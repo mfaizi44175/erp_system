@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP System - Query Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-building me-2"></i>ERP System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto" id="mainNavigation">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" onclick="showModule('queries', this)" data-permission="queries">
+                            <i class="fas fa-search me-1"></i>Queries
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showModule('quotations', this)" data-permission="quotations">
+                            <i class="fas fa-file-invoice me-1"></i>Quotations
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showModule('purchase-orders', this)" data-permission="purchase_orders">
+                            <i class="fas fa-shopping-cart me-1"></i>Purchase Orders
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showModule('invoices', this)" data-permission="invoices">
+                            <i class="fas fa-receipt me-1"></i>Invoices
+                        </a>
+                    </li>
+                    <li class="nav-item" id="adminNavItem" style="display: none;">
+                        <a class="nav-link" href="#" onclick="showModule('admin', this)" data-permission="admin">
+                            <i class="fas fa-users-cog me-1"></i>Admin
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-user me-1"></i><span id="currentUser">User</span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><h6 class="dropdown-header" id="userInfo">User Information</h6></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" onclick="logout()">
+                                <i class="fas fa-sign-out-alt me-2"></i>Logout
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Query Module -->
+        <div id="queries-module" class="module-content">
+            <div class="row">
+                <div class="col-12">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2><i class="fas fa-search me-2"></i>Query Management</h2>
+                        <button class="btn btn-primary" onclick="showQueryForm()">
+                            <i class="fas fa-plus me-1"></i>New Query
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Query Dashboard -->
+            <div id="query-dashboard">
+                <!-- Search and Filter Section -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" class="form-control" id="query-search" placeholder="Search by Client Query# or NSETS Case#">
+                            <button class="btn btn-outline-secondary" type="button" onclick="clearSearch()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <select class="form-select" id="status-filter" onchange="filterQueries()">
+                            <option value="all">All Queries</option>
+                            <option value="pending" selected>Pending Queries</option>
+                            <option value="submitted">Submitted Queries</option>
+                            <option value="deleted">Deleted Queries</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Query Table -->
+                <div class="table-responsive">
+                    <table class="table table-hover" id="queries-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th onclick="sortTable('nsets_case_number')" style="cursor: pointer;">
+                                    NSETS Case# <i class="fas fa-sort"></i>
+                                </th>
+                                <th onclick="sortTable('client_name')" style="cursor: pointer;">
+                                    Client Case Number <i class="fas fa-sort"></i>
+                                </th>
+                                <th onclick="sortTable('organization')" style="cursor: pointer;">
+                                    Organization <i class="fas fa-sort"></i>
+                                </th>
+                                <th onclick="sortTable('enquiry_date')" style="cursor: pointer;">
+                                    Enquiry Date <i class="fas fa-sort"></i>
+                                </th>
+                                <th onclick="sortTable('last_submission_date')" style="cursor: pointer;">
+                                    Last Submission <i class="fas fa-sort"></i>
+                                </th>
+                                <th onclick="sortTable('query_sent_to')" style="cursor: pointer;">
+                                    Query Sent To <i class="fas fa-sort"></i>
+                                </th>
+                                <th onclick="sortTable('status')" style="cursor: pointer;">
+                                    Status <i class="fas fa-sort"></i>
+                                </th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queries-table-body">
+                            <!-- Query rows will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Empty State -->
+                <div id="queries-empty-state" class="text-center py-5" style="display: none;">
+                    <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No queries found</h5>
+                    <p class="text-muted">Try adjusting your search criteria or create a new query.</p>
+                </div>
+            </div>
+
+            <!-- Query Form -->
+            <div id="query-form-container" class="d-none">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 id="form-title">New Query</h4>
+                        <button type="button" class="btn-close float-end" onclick="hideQueryForm()"></button>
+                    </div>
+                    <div class="card-body">
+                        <form id="query-form" enctype="multipart/form-data">
+                            <input type="hidden" id="query-id" name="query-id">
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="org-department" class="form-label">ORG/Department</label>
+                                        <input type="text" class="form-control" id="org-department" name="org_department" list="org-suggestions" required>
+                                        <datalist id="org-suggestions"></datalist>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="client-case-number" class="form-label">Client Case Number</label>
+                                        <input type="text" class="form-control" id="client-case-number" name="client_case_number" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="date" class="form-label">Date</label>
+                                        <input type="date" class="form-control" id="date" name="date" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="last-submission-date" class="form-label">Last Date of Submission</label>
+                                        <input type="date" class="form-control" id="last-submission-date" name="last_submission_date" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="client-name" class="form-label">Client Name</label>
+                                        <input type="text" class="form-control" id="client-name" name="client_name" list="client-suggestions" required>
+                                        <datalist id="client-suggestions"></datalist>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="query-sent-to" class="form-label">Query Sent to Suppliers</label>
+                                        <div class="tag-input-container">
+                                            <div class="tags-display" id="suppliers-tags"></div>
+                                            <input type="text" class="form-control tag-input" id="supplier-input" placeholder="Type supplier name and press Enter" list="supplier-suggestions">
+                                            <input type="hidden" id="query-sent-to" name="query_sent_to" required>
+                                        </div>
+                                        <div class="form-text">Type supplier name and press Enter to add. Click × to remove.</div>
+                                        <datalist id="supplier-suggestions"></datalist>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="attachment" class="form-label">Upload Original Attachment</label>
+                                        <input type="file" class="form-control" id="attachment" name="attachment" accept=".jpg,.jpeg,.png,.pdf">
+                                        <div class="form-text">Accepted formats: JPG, PNG, PDF</div>
+                                    </div>
+                                </div>
+                                <!-- Status is automatically set to pending and can only be changed via dedicated status change button -->
+                            </div>
+
+                            <hr>
+                            <h5>Datasheet Entries</h5>
+                            
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="nsets-case-number" class="form-label">NSETS Case Number</label>
+                                        <input type="text" class="form-control" id="nsets-case-number" name="nsets_case_number" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="enquiry-date" class="form-label">Enquiry Date</label>
+                                        <input type="date" class="form-control" id="enquiry-date" name="enquiry_date" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="last-submission-excel-date" class="form-label">Last Date of Submission (Excel)</label>
+                                        <input type="date" class="form-control" id="last-submission-excel-date" name="last_submission_excel_date" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6>Datasheet Items</h6>
+                                <button type="button" class="btn btn-success btn-sm" onclick="addItem()">
+                                    <i class="fas fa-plus me-1"></i>Add Item
+                                </button>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-bordered" id="items-table">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Serial#</th>
+                                            <th>Manufacturer#</th>
+                                            <th>Stockist#</th>
+                                            <th>COO</th>
+                                            <th>Brand</th>
+                                            <th>Description</th>
+                                            <th>A/U</th>
+                                            <th>Quantity</th>
+                                            <th>Remarks</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="items-tbody">
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="d-flex justify-content-between">
+                                <button type="button" class="btn btn-secondary" onclick="hideQueryForm()">Cancel</button>
+                                <div>
+                                    <button type="button" class="btn btn-info me-2" onclick="generateExcel()">
+                                        <i class="fas fa-file-excel me-1"></i>Generate Excel
+                                    </button>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save me-1"></i>Save Query
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quotation Module -->
+        <div id="quotations-module" class="module-content d-none">
+            <div class="row">
+                <div class="col-12">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2><i class="fas fa-file-invoice me-2"></i>Quotation Management</h2>
+                        <button class="btn btn-primary" onclick="showQuotationForm()">
+                            <i class="fas fa-plus me-1"></i>New Quotation
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quotation Dashboard -->
+            <div id="quotation-dashboard">
+                <!-- Search and Filter Controls -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" class="form-control" id="quotation-search" placeholder="Search by quotation number, client...">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" id="quotation-currency-filter">
+                            <option value="">All Currencies</option>
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBP">GBP</option>
+                            <option value="PKR">PKR</option>
+                            <option value="CNY">CNY (Chinese Yuan)</option>
+                            <option value="JPY">JPY (Japanese Yen)</option>
+                            <option value="HKD">HKD (Hong Kong Dollar)</option>
+                            <option value="KRW">KRW (Korean Won)</option>
+                            <option value="INR">INR (Indian Rupee)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-outline-secondary" onclick="clearQuotationFilters()">
+                            <i class="fas fa-times me-1"></i>Clear Filters
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quotations Table -->
+                <div class="table-responsive">
+                    <table class="table table-hover" id="quotations-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="sortable" data-sort="quotation_number">
+                                    Quotation Number
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="date">
+                                    Date
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="to_client">
+                                    Client
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="currency">
+                                    Currency
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="grand_total">
+                                    Total Amount
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="quotations-table-body">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Empty State -->
+                <div id="quotations-empty-state" class="empty-state d-none">
+                    <i class="fas fa-file-invoice"></i>
+                    <h4>No quotations found</h4>
+                    <p>Create your first quotation to get started.</p>
+                </div>
+            </div>
+
+            <!-- Quotation Form -->
+            <div id="quotation-form-container" class="d-none">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 id="quotation-form-title">New Quotation</h4>
+                        <button type="button" class="btn-close float-end" onclick="hideQuotationForm()"></button>
+                    </div>
+                    <div class="card-body">
+                        <form id="quotation-form">
+                            <input type="hidden" id="quotation-id" name="quotation-id">
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="quotation-number" class="form-label">Quotation Number</label>
+                                        <input type="text" class="form-control" id="quotation-number" name="quotation_number" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="quotation-date" class="form-label">Date</label>
+                                        <input type="date" class="form-control" id="quotation-date" name="date" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="to-client" class="form-label">To</label>
+                                        <input type="text" class="form-control" id="to-client" name="to_client" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="linked-query" class="form-label">Linked Query</label>
+                                        <select class="form-select" id="linked-query" name="query_id">
+                            <option value="">Select Query</option>
+                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="quotation-attachment" class="form-label">Attachment (Optional)</label>
+                                        <input type="file" class="form-control" id="quotation-attachment" name="attachment" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.xlsx,.xls">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr>
+                            <h5>Calculation Settings</h5>
+                            
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="currency" class="form-label">Currency</label>
+                                        <select class="form-select" id="currency" name="currency">
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBP">GBP</option>
+                            <option value="PKR">PKR</option>
+                            <option value="CNY">CNY (Chinese Yuan)</option>
+                            <option value="JPY">JPY (Japanese Yen)</option>
+                            <option value="HKD">HKD (Hong Kong Dollar)</option>
+                            <option value="KRW">KRW (Korean Won)</option>
+                            <option value="INR">INR (Indian Rupee)</option>
+                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="quotation-type" class="form-label">Quotation Type</label>
+                                        <select class="form-select" id="quotation-type" name="quotation_type" onchange="toggleGSTFreight()">
+                                            <option value="local">Local</option>
+                                            <option value="foreign">Foreign</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6>Quotation Items</h6>
+                                <button type="button" class="btn btn-success btn-sm" onclick="addQuotationItem()">
+                                    <i class="fas fa-plus me-1"></i>Add Item
+                                </button>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-bordered" id="quotation-items-table">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Serial#</th>
+                                            <th>Manufacturer#</th>
+                                            <th>Stockist#</th>
+                                            <th>COO</th>
+                                            <th>Brand</th>
+                                            <th>Description</th>
+                                            <th>A/U</th>
+                                            <th>Quantity</th>
+                                            <th>U/P</th>
+                                            <th>T/P</th>
+                                            <th>Supplier U/P</th>
+                                            <th>Profit Factor</th>
+                                            <th>Exchange Rate</th>
+                                            <th>Calculated Price</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="quotation-items-tbody">
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="row mt-3">
+                                <div class="col-md-8"></div>
+                                <div class="col-md-4">
+                                    <table class="table table-sm">
+                                        <tr>
+                                            <td><strong id="total-label">Total without GST:</strong></td>
+                                            <td><span id="total-without-gst">0.00</span></td>
+                                        </tr>
+                                        <tr id="gst-freight-row">
+                                            <td><strong id="gst-freight-label">GST (18%):</strong></td>
+                                            <td>
+                                                <span id="gst-amount" class="gst-display">0.00</span>
+                                                <input type="number" id="freight-amount" class="form-control form-control-sm freight-input d-none" placeholder="Enter freight amount" step="0.01" min="0" onchange="calculateTotals()">
+                                            </td>
+                                        </tr>
+                                        <tr class="table-primary">
+                                            <td><strong>Grand Total:</strong></td>
+                                            <td><strong><span id="grand-total">0.00</span></strong></td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <input type="hidden" id="total-without-gst-input" name="total_without_gst">
+                            <input type="hidden" id="gst-amount-input" name="gst_amount">
+                            <input type="hidden" id="grand-total-input" name="grand_total">
+
+                            <div class="d-flex justify-content-between">
+                                <button type="button" class="btn btn-secondary" onclick="hideQuotationForm()">Cancel</button>
+                                <div>
+                                    <button type="button" class="btn btn-info me-2" onclick="generateQuotationExcel()">
+                                        <i class="fas fa-file-excel me-1"></i>Generate Excel
+                                    </button>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save me-1"></i>Save Quotation
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="purchase-orders-module" class="module-content d-none">
+            <div class="row">
+                <div class="col-12">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2><i class="fas fa-shopping-cart me-2"></i>Purchase Order Management</h2>
+                        <button class="btn btn-primary" onclick="showPurchaseOrderForm()">
+                            <i class="fas fa-plus me-1"></i>New Purchase Order
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Purchase Order Dashboard -->
+            <div id="purchase-order-dashboard">
+                <!-- Search and Filter Controls -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" class="form-control" id="po-search" placeholder="Search by PO#, supplier name...">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-outline-secondary" onclick="clearPOFilters()">
+                            <i class="fas fa-times me-1"></i>Clear Filters
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Purchase Orders Table -->
+                <div class="table-responsive">
+                    <table class="table table-hover" id="purchase-orders-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="sortable" data-sort="po_number">
+                                    PO Number
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="date">
+                                    Date
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="supplier_name">
+                                    Supplier Name
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="grand_total">
+                                    Grand Total
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="purchase-orders-table-body">
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Empty State -->
+                <div id="purchase-orders-empty-state" class="empty-state d-none">
+                    <i class="fas fa-shopping-cart"></i>
+                    <h4>No purchase orders found</h4>
+                    <p>Create your first purchase order to get started.</p>
+                </div>
+            </div>
+
+            <!-- Purchase Order Form -->
+            <div id="purchase-order-form-container" class="d-none">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 id="purchase-order-form-title">New Purchase Order</h4>
+                        <button type="button" class="btn-close float-end" onclick="hidePurchaseOrderForm()"></button>
+                    </div>
+                    <div class="card-body">
+                        <form id="purchase-order-form">
+                            <input type="hidden" id="purchase-order-id" name="purchase-order-id">
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="po-number" class="form-label">PO Number</label>
+                                        <input type="text" class="form-control" id="po-number" name="po_number" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="po-date" class="form-label">Date</label>
+                                        <input type="date" class="form-control" id="po-date" name="date" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="supplier-name" class="form-label">Supplier Name</label>
+                                        <input type="text" class="form-control" id="supplier-name" name="supplier_name" list="supplier-name-suggestions" required>
+                                        <datalist id="supplier-name-suggestions"></datalist>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="supplier-address" class="form-label">Supplier Address</label>
+                                        <textarea class="form-control" id="supplier-address" name="supplier_address" rows="3" list="supplier-address-suggestions" required></textarea>
+                                        <datalist id="supplier-address-suggestions"></datalist>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Items Section -->
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5>Items</h5>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="addPurchaseOrderItem()">
+                                        <i class="fas fa-plus me-1"></i>Add Item
+                                    </button>
+                                </div>
+                                
+                                <div class="table-responsive">
+                                    <table class="table table-bordered">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th style="width: 60px;">Sr No.</th>
+                                                <th style="width: 150px;">Manufacturer #</th>
+                                                <th style="width: 150px;">Stockist #</th>
+                                                <th style="width: 120px;">COO</th>
+                                                <th style="width: 120px;">Brand</th>
+                                                <th style="width: 200px;">Description</th>
+                                                <th style="width: 80px;">A/U</th>
+                                                <th style="width: 100px;">Quantity</th>
+                                                <th style="width: 100px;">U/P</th>
+                                                <th style="width: 100px;">T/P</th>
+                                                <th style="width: 120px;">Delivery Time</th>
+                                                <th style="width: 150px;">Remarks</th>
+                                                <th style="width: 60px;">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="po-items-tbody">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Totals Section -->
+                            <div class="row">
+                                <div class="col-md-6 offset-md-6">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <!-- Currency Selector -->
+                                            <div class="row mb-3">
+                                                <div class="col-6">
+                                                    <label for="po-currency" class="form-label">Currency:</label>
+                                                </div>
+                                                <div class="col-6">
+                                                    <select class="form-select" id="po-currency" name="po_currency" onchange="updatePOCurrencyDisplay()">
+                                                        <option value="USD" data-symbol="$">USD ($)</option>
+                                                        <option value="EUR" data-symbol="€">EUR (€)</option>
+                                                        <option value="GBP" data-symbol="£">GBP (£)</option>
+                                                        <option value="INR" data-symbol="₹" selected>INR (₹)</option>
+                                                        <option value="JPY" data-symbol="¥">JPY (¥)</option>
+                                                        <option value="CNY" data-symbol="¥">CNY (¥)</option>
+                                                        <option value="AUD" data-symbol="A$">AUD (A$)</option>
+                                                        <option value="CAD" data-symbol="C$">CAD (C$)</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="row mb-2">
+                                                <div class="col-6"><strong>Total Price:</strong></div>
+                                                <div class="col-6 text-end"><span id="po-currency-symbol">₹</span><span id="po-total-price">0.00</span></div>
+                                            </div>
+                                            <div class="row mb-2">
+                                                <div class="col-6">
+                                                    <label for="freight-charges" class="form-label">Freight Charges:</label>
+                                                </div>
+                                                <div class="col-6">
+                                                    <div class="input-group">
+                                                        <span class="input-group-text" id="freight-currency-symbol">₹</span>
+                                                        <input type="number" class="form-control" id="freight-charges" name="freight_charges" step="0.01" value="0" onchange="calculatePOTotals()">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <hr>
+                                            <div class="row">
+                                                <div class="col-6"><strong>Grand Total:</strong></div>
+                                                <div class="col-6 text-end"><strong><span id="grand-total-currency-symbol">₹</span><span id="po-grand-total">0.00</span></strong></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <button type="submit" class="btn btn-primary me-2">
+                                        <i class="fas fa-save me-1"></i>Save Purchase Order
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" onclick="hidePurchaseOrderForm()">
+                                        <i class="fas fa-times me-1"></i>Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="invoices-module" class="module-content d-none">
+            <h2><i class="fas fa-receipt me-2"></i>Invoice Management</h2>
+            <p class="text-muted">Invoice module will be implemented here.</p>
+        </div>
+
+        <!-- Admin Module -->
+        <div id="admin-module" class="module-content d-none">
+            <div class="row">
+                <div class="col-12">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2><i class="fas fa-users-cog me-2"></i>Admin Dashboard</h2>
+                        <button class="btn btn-primary" onclick="showCreateUserModal()">
+                            <i class="fas fa-user-plus me-1"></i>Create User
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Navigation Tabs -->
+            <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard-pane" type="button" role="tab">
+                        <i class="fas fa-tachometer-alt me-1"></i>Dashboard
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users-pane" type="button" role="tab">
+                        <i class="fas fa-users me-1"></i>User Management
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-pane" type="button" role="tab">
+                        <i class="fas fa-cogs me-1"></i>System Settings
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history-pane" type="button" role="tab">
+                        <i class="fas fa-history me-1"></i>Activity History
+                    </button>
+                </li>
+            </ul>
+
+            <!-- Tab Content -->
+            <div class="tab-content" id="adminTabContent">
+                <!-- Dashboard Tab -->
+                <div class="tab-pane fade show active" id="dashboard-pane" role="tabpanel">
+                    <!-- Admin Dashboard Cards -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 id="totalUsersCount">0</h4>
+                                    <p class="mb-0">Total Users</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-users fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 id="activeUsersCount">0</h4>
+                                    <p class="mb-0">Active Users</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-user-check fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 id="adminUsersCount">0</h4>
+                                    <p class="mb-0">Admin Users</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-user-shield fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-info text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 id="regularUsersCount">0</h4>
+                                    <p class="mb-0">Regular Users</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-user fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+                </div>
+
+                <!-- User Management Tab -->
+                <div class="tab-pane fade" id="users-pane" role="tabpanel">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4><i class="fas fa-users me-2"></i>User Management</h4>
+                        <button class="btn btn-primary" onclick="showCreateUserModal()">
+                            <i class="fas fa-user-plus me-1"></i>Create User
+                        </button>
+                    </div>
+                    
+                    <!-- Users Management Table -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">All Users</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="users-table">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Username</th>
+                                            <th>Full Name</th>
+                                            <th>Email</th>
+                                            <th>Role</th>
+                                            <th>Status</th>
+                                            <th>Permissions</th>
+                                            <th>Created</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="users-table-body">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Settings Tab -->
+                <div class="tab-pane fade" id="settings-pane" role="tabpanel">
+                    <h4><i class="fas fa-cogs me-2"></i>System Settings</h4>
+                    
+                    <div class="row">
+                        <!-- Account Settings -->
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="mb-0"><i class="fas fa-user-cog me-2"></i>Account Settings</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="accountSettingsForm">
+                                        <div class="mb-3">
+                                            <label for="currentUsername" class="form-label">Current Username</label>
+                                            <input type="text" class="form-control" id="currentUsername" readonly>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="newFullName" class="form-label">Full Name</label>
+                                            <input type="text" class="form-control" id="newFullName" placeholder="Enter full name">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="newEmail" class="form-label">Email</label>
+                                            <input type="email" class="form-control" id="newEmail" placeholder="Enter email address">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">
+                                            <i class="fas fa-save me-1"></i>Update Profile
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Password Change -->
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="mb-0"><i class="fas fa-key me-2"></i>Change Password</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="passwordChangeForm">
+                                        <div class="mb-3">
+                                            <label for="currentPassword" class="form-label">Current Password</label>
+                                            <input type="password" class="form-control" id="currentPassword" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="newPassword" class="form-label">New Password</label>
+                                            <input type="password" class="form-control" id="newPassword" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="confirmPassword" class="form-label">Confirm New Password</label>
+                                            <input type="password" class="form-control" id="confirmPassword" required>
+                                        </div>
+                                        <button type="submit" class="btn btn-warning">
+                                            <i class="fas fa-key me-1"></i>Change Password
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mt-4">
+                        <!-- System Information -->
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>System Information</h5>
+                                </div>
+                                <div class="card-body">
+                                    <table class="table table-sm">
+                                        <tr>
+                                            <td><strong>System Version:</strong></td>
+                                            <td id="systemVersion">ERP v1.0.0</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Database:</strong></td>
+                                            <td id="databaseType">SQLite</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Database Size:</strong></td>
+                                            <td id="databaseSize">Loading...</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Server Status:</strong></td>
+                                            <td><span class="badge bg-success" id="serverStatus">Running</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Server Uptime:</strong></td>
+                                            <td id="serverUptime">Loading...</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Node.js Version:</strong></td>
+                                            <td id="nodeVersion">Loading...</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Total Users:</strong></td>
+                                            <td id="totalUsersCount">Loading...</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Total Queries:</strong></td>
+                                            <td id="totalQueriesCount">Loading...</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Active Sessions:</strong></td>
+                                            <td id="activeSessionsCount">Loading...</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Last Backup:</strong></td>
+                                            <td id="lastBackupTime">Never</td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- System Actions -->
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="mb-0"><i class="fas fa-tools me-2"></i>System Actions</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="d-grid gap-2">
+                                        <button class="btn btn-info" onclick="backupDatabase()">
+                                            <i class="fas fa-download me-1"></i>Backup Database
+                                        </button>
+                                        <button class="btn btn-warning" onclick="clearOldSessions()">
+                                            <i class="fas fa-broom me-1"></i>Clear Old Sessions
+                                        </button>
+                                        <button class="btn btn-secondary" onclick="viewSystemLogs()">
+                                            <i class="fas fa-file-alt me-1"></i>View System Logs
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- History Tab -->
+                <div class="tab-pane fade" id="history-pane" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="fas fa-history me-2"></i>Activity History</h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Filter Controls -->
+                            <div class="row mb-3">
+                                <div class="col-md-3">
+                                    <select class="form-select" id="actionFilter">
+                                        <option value="">All Actions</option>
+                                        <option value="create">Create</option>
+                                        <option value="update">Update</option>
+                                        <option value="delete">Delete</option>
+                                        <option value="export">Export</option>
+                                        <option value="backup">Backup</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <select class="form-select" id="entityFilter">
+                                        <option value="">All Entities</option>
+                                        <option value="query">Queries</option>
+                                        <option value="quotation">Quotations</option>
+                                        <option value="purchase_order">Purchase Orders</option>
+                                        <option value="system">System</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <select class="form-select" id="userFilter">
+                                        <option value="">All Users</option>
+                                        <!-- Users will be populated dynamically -->
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <button class="btn btn-primary" onclick="loadActivityLogs()">
+                                        <i class="fas fa-search me-1"></i>Filter
+                                    </button>
+                                    <button class="btn btn-secondary" onclick="clearHistoryFilters()">
+                                        <i class="fas fa-times me-1"></i>Clear
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Activity Logs Table -->
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Date/Time</th>
+                                            <th>User</th>
+                                            <th>Action</th>
+                                            <th>Entity</th>
+                                            <th>Details</th>
+                                            <th>File</th>
+                                            <th>IP Address</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="activityLogsTableBody">
+                                        <tr>
+                                            <td colspan="7" class="text-center">Loading activity logs...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- Pagination -->
+                            <nav aria-label="Activity logs pagination">
+                                <ul class="pagination justify-content-center" id="historyPagination">
+                                    <!-- Pagination will be populated dynamically -->
+                                </ul>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Query Detail Modal -->
+    <div class="modal fade" id="queryDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Query Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="query-detail-content">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Purchase Order Detail Modal -->
+    <div class="modal fade" id="purchaseOrderDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Purchase Order Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="purchase-order-detail-content">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" onclick="printPurchaseOrder()">
+                        <i class="fas fa-print me-1"></i>Print
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Change Modal -->
+    <div class="modal fade" id="statusChangeModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Change Query Status to Submitted</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Please provide supplier responses for at least one entry before changing status to submitted.
+                    </div>
+                    
+                    <div id="supplier-responses-container">
+                        <!-- Supplier response entries will be populated here -->
+                    </div>
+                    
+                    <div class="mt-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="confirm-all-responses">
+                            <label class="form-check-label" for="confirm-all-responses">
+                                I confirm that supplier responses have been collected
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="update-status-btn" onclick="updateQueryStatus()" disabled>
+                        <i class="fas fa-check me-1"></i>Update Status
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create User Modal -->
+    <div class="modal fade" id="createUserModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New User</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="createUserForm">
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="newUsername" class="form-label">Username *</label>
+                                    <input type="text" class="form-control" id="newUsername" name="username" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="newFullName" class="form-label">Full Name *</label>
+                                    <input type="text" class="form-control" id="newFullName" name="full_name" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="newEmail" class="form-label">Email *</label>
+                                    <input type="email" class="form-control" id="newEmail" name="email" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="newPassword" class="form-label">Password *</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="newPassword" name="password" required>
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('newPassword')">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="newRole" class="form-label">Role *</label>
+                                    <select class="form-select" id="newRole" name="role" required onchange="handleRoleChange(this)">
+                                        <option value="user">User</option>
+                                        <option value="admin">Admin</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="newStatus" class="form-label">Status *</label>
+                                    <select class="form-select" id="newStatus" name="status" required>
+                                        <option value="active">Active</option>
+                                        <option value="inactive">Inactive</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3" id="permissionsSection">
+                            <label class="form-label">Permissions</label>
+                            <div class="alert alert-info" style="font-size: 0.85rem;">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Select which modules this user can access. Admin users automatically get all permissions.
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="permQueries" name="permissions" value="queries" checked>
+                                        <label class="form-check-label" for="permQueries">
+                                            <i class="fas fa-search me-1"></i>Queries
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="permQuotations" name="permissions" value="quotations">
+                                        <label class="form-check-label" for="permQuotations">
+                                            <i class="fas fa-file-invoice me-1"></i>Quotations
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="permPurchaseOrders" name="permissions" value="purchase_orders">
+                                        <label class="form-check-label" for="permPurchaseOrders">
+                                            <i class="fas fa-shopping-cart me-1"></i>Purchase Orders
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="permInvoices" name="permissions" value="invoices">
+                                        <label class="form-check-label" for="permInvoices">
+                                            <i class="fas fa-receipt me-1"></i>Invoices
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-user-plus me-1"></i>Create User
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div class="modal fade" id="editUserModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit User</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="editUserForm">
+                    <input type="hidden" id="editUserId" name="user_id">
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editUsername" class="form-label">Username *</label>
+                                    <input type="text" class="form-control" id="editUsername" name="username" required readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editFullName" class="form-label">Full Name *</label>
+                                    <input type="text" class="form-control" id="editFullName" name="full_name" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editEmail" class="form-label">Email *</label>
+                                    <input type="email" class="form-control" id="editEmail" name="email" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editRole" class="form-label">Role *</label>
+                                    <select class="form-select" id="editRole" name="role" required onchange="handleEditRoleChange(this)">
+                                        <option value="user">User</option>
+                                        <option value="admin">Admin</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editStatus" class="form-label">Status *</label>
+                                    <select class="form-select" id="editStatus" name="status" required>
+                                        <option value="active">Active</option>
+                                        <option value="inactive">Inactive</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3" id="editPermissionsSection">
+                            <label class="form-label">Permissions</label>
+                            <div class="alert alert-info" style="font-size: 0.85rem;">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Select which modules this user can access. Admin users automatically get all permissions.
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="editPermQueries" name="permissions" value="queries">
+                                        <label class="form-check-label" for="editPermQueries">
+                                            <i class="fas fa-search me-1"></i>Queries
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="editPermQuotations" name="permissions" value="quotations">
+                                        <label class="form-check-label" for="editPermQuotations">
+                                            <i class="fas fa-file-invoice me-1"></i>Quotations
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="editPermPurchaseOrders" name="permissions" value="purchase_orders">
+                                        <label class="form-check-label" for="editPermPurchaseOrders">
+                                            <i class="fas fa-shopping-cart me-1"></i>Purchase Orders
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="editPermInvoices" name="permissions" value="invoices">
+                                        <label class="form-check-label" for="editPermInvoices">
+                                            <i class="fas fa-receipt me-1"></i>Invoices
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-1"></i>Update User
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset Password Modal -->
+    <div class="modal fade" id="resetPasswordModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Reset Password</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="resetPasswordForm">
+                    <input type="hidden" id="resetUserId" name="user_id">
+                    <div class="modal-body">
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            You are about to reset the password for user: <strong id="resetUserName"></strong>
+                        </div>
+                        <div class="mb-3">
+                            <label for="newPasswordReset" class="form-label">New Password *</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="newPasswordReset" name="new_password" required>
+                                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('newPasswordReset')">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="confirmPasswordReset" class="form-label">Confirm Password *</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="confirmPasswordReset" name="confirm_password" required>
+                                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('confirmPasswordReset')">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-danger">
+                            <i class="fas fa-key me-1"></i>Reset Password
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

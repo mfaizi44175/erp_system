@@ -2774,18 +2774,18 @@ async function showStatusChangeModal(queryId) {
                             <div class="col-md-6">
                                 <label class="form-label">Response Status</label>
                                 <div class="form-check">
-                                    <input class="form-check-input supplier-response" type="radio" name="supplier_" + index + "" id="supplier_" + index + "_yes" value="yes" onchange="toggleAttachmentUpload(" + index + ")">
-                                    <label class="form-check-label" for="supplier_" + index + "_yes">Yes - Response Received</label>
+                                    <input class="form-check-input supplier-response" type="radio" name="supplier_${index}" id="supplier_${index}_yes" value="yes" onchange="toggleAttachmentUpload(${index})">
+                                    <label class="form-check-label" for="supplier_${index}_yes">Yes - Response Received</label>
                                 </div>
                                 <div class="form-check">
-                                    <input class="form-check-input supplier-response" type="radio" name="supplier_" + index + "" id="supplier_" + index + "_no" value="no" onchange="toggleAttachmentUpload(" + index + ")">
-                                    <label class="form-check-label" for="supplier_" + index + "_no">No - No Response</label>
+                                    <input class="form-check-input supplier-response" type="radio" name="supplier_${index}" id="supplier_${index}_no" value="no" onchange="toggleAttachmentUpload(${index})">
+                                    <label class="form-check-label" for="supplier_${index}_no">No - No Response</label>
                                 </div>
                             </div>
                             <div class="col-md-6">
-                                <div id="attachment_" + index + "" class="attachment-upload" style="display: none;">
+                                <div id="attachment_${index}" class="attachment-upload" style="display: none;">
                                     <label class="form-label">Upload Supplier Response</label>
-                                    <input type="file" class="form-control" name="supplier_attachment_" + index + "" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx">
+                                    <input type="file" class="form-control" name="supplier_attachment_${index}" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx">
                                     <div class="form-text">Accepted formats: PDF, Images, Word, Excel</div>
                                 </div>
                             </div>

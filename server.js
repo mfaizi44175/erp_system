@@ -304,8 +304,11 @@ db.serialize(() => {
   // Create default admin user if no users exist
   db.get('SELECT COUNT(*) as count FROM users', (err, row) => {
     if (!err && row.count === 0) {
-      const bcrypt = require('bcrypt');
-      const defaultPassword = bcrypt.hashSync('admin123', 10);
+      const DEFAULT_ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'Shahzad';
+      const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'NSets123';
+      const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10);
+
+      const hashedPassword = bcrypt.hashSync(DEFAULT_ADMIN_PASSWORD, BCRYPT_ROUNDS);
       const adminPermissions = JSON.stringify({
         queries: true,
         quotations: true,
@@ -313,15 +316,15 @@ db.serialize(() => {
         invoices: true,
         admin: true
       });
-      
-      db.run(`INSERT INTO users (username, password, full_name, role, permissions) 
-              VALUES (?, ?, ?, ?, ?)`, 
-             ['admin', defaultPassword, 'System Administrator', 'admin', adminPermissions], 
+
+      db.run(`INSERT INTO users (username, password, full_name, role, permissions)
+              VALUES (?, ?, ?, ?, ?)`,
+             [DEFAULT_ADMIN_USERNAME, hashedPassword, 'System Administrator', 'admin', adminPermissions],
              (err) => {
                if (err) {
                  console.error('Error creating default admin user:', err);
                } else {
-                 console.log('Default admin user created: username=admin, password=admin123');
+                 console.log('Default admin user created. Please change the admin password immediately.');
                }
              });
     }

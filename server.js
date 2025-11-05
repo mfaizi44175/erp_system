@@ -8,17 +8,39 @@ const ExcelJS = require('exceljs');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
 const crypto = require('crypto');
+// Load environment variables from .env if present
+try {
+  require('dotenv').config();
+} catch (e) {
+  // dotenv not installed or .env not present; continue with process.env defaults
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// CORS configuration (allow all if ALLOWED_ORIGINS is not set)
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
 // Session configuration
 app.use(session({
-  secret: 'your-secret-key-change-in-production',
+  secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // Set to true in production with HTTPS
+    secure: process.env.SESSION_SECURE === 'true', // Set to true in production with HTTPS
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
@@ -29,12 +51,13 @@ app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
 // Ensure uploads directory and subdirectories exist
-fs.ensureDirSync('uploads');
-fs.ensureDirSync('uploads/queries');
-fs.ensureDirSync('uploads/quotations');
-fs.ensureDirSync('uploads/purchase_orders');
-fs.ensureDirSync('uploads/invoices');
-fs.ensureDirSync('uploads/attachments');
+const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads';
+fs.ensureDirSync(UPLOAD_DIR);
+fs.ensureDirSync(path.join(UPLOAD_DIR, 'queries'));
+fs.ensureDirSync(path.join(UPLOAD_DIR, 'quotations'));
+fs.ensureDirSync(path.join(UPLOAD_DIR, 'purchase_orders'));
+fs.ensureDirSync(path.join(UPLOAD_DIR, 'invoices'));
+fs.ensureDirSync(path.join(UPLOAD_DIR, 'attachments'));
 
 // Function to determine upload destination based on request context
 function getUploadDestination(req, file) {
@@ -86,7 +109,8 @@ const upload = multer({
 });
 
 // Database initialization
-const db = new sqlite3.Database('erp_system.db');
+  const DB_PATH = process.env.DB_PATH || 'erp_system.db';
+  const db = new sqlite3.Database(DB_PATH);
 
 // Create tables
 db.serialize(() => {

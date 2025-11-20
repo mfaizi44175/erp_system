@@ -48,8 +48,12 @@ npm start
 5. Open your browser and navigate to `http://localhost:3000`
 
 ### Default Login
-- Username: `admin`
-- Password: `admin123`
+The system will create a default admin user on first run when the database is empty. You can control the username and password via environment variables.
+
+- Username: `ADMIN_USERNAME` in `.env` (defaults to `admin`)
+- Password: `ADMIN_PASSWORD` in `.env` (set a strong value)
+
+Note: If users already exist in the database, changing the `.env` values does not update existing user passwords automatically.
 
 ## Development
 
@@ -78,6 +82,44 @@ erp-system/
 - `npm start` - Start the production server
 - `npm run dev` - Start development server with auto-reload
 - `npm test` - Run tests (to be implemented)
+
+### API Testing Scripts
+
+This repository includes helper scripts to test major API endpoints end-to-end. Before running them:
+
+1. Run the development server (example uses port 4002):
+```bash
+PORT=4002 DB_PATH=./erp_system.db UPLOAD_DIR=./uploads ALLOWED_ORIGINS=http://localhost:4002 npm run dev
+```
+
+2. In a separate terminal, set credentials for testing and run the scripts. You can also set `TEST_PORT` if your server is not on 4002.
+
+```bash
+# PowerShell examples
+$env:ADMIN_USERNAME = "admin"
+$env:ADMIN_PASSWORD = "AdminTest!2025"
+$env:TEST_PORT = "4002"
+
+# Authentication checks
+node scripts/test_auth.js
+
+# Quotation flow (create, get, update, export Excel)
+node scripts/test_quotations.js
+
+# Purchase orders flow (create, get, update, export Excel)
+node scripts/test_purchase_orders.js
+
+# Activity logs (admin-only, with filters)
+node scripts/test_activity_logs.js
+
+# User administration endpoints (list/get/update/password)
+node scripts/test_users.js
+
+# Query status update with supplier responses (multipart)
+node scripts/test_query_status_supplier.js
+```
+
+Important: File uploads are validated by the server. Allowed file types are `.png`, `.jpg`, `.jpeg`, `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`. Sending other file types will result in a 500 error from Multer’s file filter.
 
 ### Database Schema
 
@@ -186,6 +228,54 @@ docker run -p 3000:3000 -d erp-system
 - Enable HTTPS in production
 - Regularly backup your database
 - Keep dependencies updated
+
+Recommended production `.env` values:
+
+```
+PORT=3000
+NODE_ENV=production
+SESSION_NAME=erp.sid
+SESSION_SECRET=your-very-strong-secret
+SESSION_SECURE=true           # requires HTTPS
+SESSION_SAME_SITE=strict
+ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+DB_PATH=./erp_system.db
+UPLOAD_DIR=./uploads
+BACKUP_DIR=./backups
+ADMIN_USERNAME=admin          # used only for initial seeding when no users exist
+ADMIN_PASSWORD=change-me      # used only for initial seeding when no users exist
+```
+
+Notes:
+- Set `SESSION_SECURE=true` only behind HTTPS; otherwise cookies won’t be sent by browsers.
+- Keep `ALLOWED_ORIGINS` limited to your trusted origins.
+- Changing `ADMIN_PASSWORD` after users exist does not alter existing accounts; use the admin UI or `scripts/reset_admin_password.js`.
+
+### CORS configuration on VPS
+- Use the `ALLOWED_ORIGINS` environment variable to list trusted origins (comma-separated). Examples:
+  - `ALLOWED_ORIGINS=https://erp.yourdomain.com,https://www.yourdomain.com`
+- Credentials are enabled in the server CORS config, so cookies can be sent cross-origin when origins match.
+- Ensure your reverse proxy (e.g., Nginx) forwards `X-Forwarded-Proto` and `Origin` headers so secure cookies work correctly.
+
+### Uploads directory mapping
+If you serve uploads directly via Nginx, map `/uploads` to the same physical directory used by `UPLOAD_DIR`.
+Example Nginx snippet:
+
+```
+location /uploads {
+    alias /absolute/path/to/uploads;
+    autoindex off;
+    add_header Cache-Control "public, max-age=3600";
+}
+```
+
+The server also serves uploads through Express at `/uploads` to match stored web paths; using an Nginx alias is optional for performance.
+
+### Automated backups
+- The admin endpoint `/api/admin/backup` creates a full backup zip into `BACKUP_DIR`.
+- Optional automated backups can be enabled with `AUTO_BACKUP_INTERVAL` (milliseconds). If greater than 0, the server will:
+  - Create backups on a schedule
+  - Prune backups older than 30 days automatically
 
 ## Backup and Recovery
 

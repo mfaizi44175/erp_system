@@ -240,6 +240,26 @@ server {
 }
 ```
 
+#### Session Security and .env Defaults Behind a Reverse Proxy
+
+To ensure secure, persistent sessions when running behind Nginx:
+
+- Confirm Nginx forwards `X-Forwarded-Proto`, `X-Forwarded-For`, and `Host` headers (see config above).
+- Use HTTPS so `SESSION_SECURE=true` cookies are accepted by browsers.
+- In your `.env`:
+  - NODE_ENV=production
+  - SESSION_NAME=erp.sid
+  - SESSION_SECRET=use-a-strong-32+char-string
+  - SESSION_DIR=/var/lib/erp/sessions
+  - SESSION_DB=sessions.sqlite
+  - SESSION_SECURE=true
+  - SESSION_SAME_SITE=none (if frontend is on a different domain) or lax
+
+Notes:
+- When `SESSION_SAME_SITE=none`, browsers require Secure cookies. Ensure TLS is active.
+- Create and chown `SESSION_DIR` to the user that runs Node.
+- The app sets `app.set('trust proxy', 1)` and `proxy: true` in express-session to honor proxy headers for Secure cookies.
+
 ```bash
 # Enable the site
 sudo ln -s /etc/nginx/sites-available/erp-system /etc/nginx/sites-enabled/

@@ -467,10 +467,21 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
+                    credentials: 'include',
                     body: JSON.stringify({ username, password })
                 });
                 
-                const data = await response.json();
+                // Attempt to parse JSON if available; otherwise, handle gracefully
+                let data = null;
+                const contentType = response.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    try {
+                        data = await response.json();
+                    } catch (parseErr) {
+                        // If JSON parsing fails, continue with fallback messaging
+                        console.error('Failed to parse JSON response from /api/login:', parseErr);
+                    }
+                }
                 
                 if (response.ok) {
                     showAlert('Login successful! Redirecting...', 'success');
@@ -478,9 +489,11 @@
                         window.location.href = '/index.html';
                     }, 1000);
                 } else {
-                    showAlert(data.error || 'Login failed');
+                    const msg = (data && (data.error || data.message)) || `Login failed (HTTP ${response.status})`;
+                    showAlert(msg);
                 }
             } catch (error) {
+                console.error('Login request failed:', error);
                 showAlert('Network error. Please try again.');
             } finally {
                 // Reset button state
@@ -490,7 +503,7 @@
         });
 
         // Check if already logged in
-        fetch('/api/auth/check')
+        fetch('/api/auth/check', { credentials: 'include' })
             .then(response => response.json())
             .then(data => {
                 if (data.authenticated) {

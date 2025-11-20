@@ -3018,7 +3018,7 @@ async function checkAuthStatus() {
     }
     
     try {
-        const response = await fetch('/api/auth/check');
+        const response = await fetch('/api/auth/check', { credentials: 'include' });
         if (response.ok) {
             const data = await response.json();
             if (data.authenticated) {
@@ -3091,7 +3091,8 @@ function redirectToLogin() {
 async function logout() {
     try {
         const response = await fetch('/api/logout', {
-            method: 'POST'
+            method: 'POST',
+            credentials: 'include'
         });
         
         if (response.ok) {
@@ -3602,6 +3603,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     headers: {
                         'Content-Type': 'application/json'
                     },
+                    credentials: 'include',
                     body: JSON.stringify({
                         username: currentUser.username,
                         password: currentPassword

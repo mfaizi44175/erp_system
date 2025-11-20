@@ -226,6 +226,10 @@ BCRYPT_ROUNDS=12
 BACKUP_DIR=./backups
 AUTO_BACKUP_INTERVAL=86400000
 ALLOWED_ORIGINS=https://yourdomain.com
+SESSION_DIR=./sessions
+SESSION_DB=sessions.sqlite
+SESSION_SECURE=true
+SESSION_SAME_SITE=strict
 ```
 
 ## Security Checklist

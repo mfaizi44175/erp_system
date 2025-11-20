@@ -8,6 +8,7 @@ const ExcelJS = require('exceljs');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
 const crypto = require('crypto');
+const archiver = require('archiver');
 // Load environment variables from .env if present
 try {
   require('dotenv').config();
@@ -17,6 +18,24 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust reverse proxy (e.g., Apache/Nginx) so secure cookies work behind HTTPS terminator
+// Default to 1 hop; override with TRUST_PROXY env if needed
+try {
+  const trustProxyEnv = process.env.TRUST_PROXY;
+  if (trustProxyEnv) {
+    const hops = parseInt(trustProxyEnv, 10);
+    if (!isNaN(hops)) {
+      app.set('trust proxy', hops);
+    } else if (trustProxyEnv === 'true') {
+      app.set('trust proxy', 1);
+    }
+  } else {
+    app.set('trust proxy', 1);
+  }
+} catch (e) {
+  app.set('trust proxy', 1);
+}
 
 // CORS configuration (allow all if ALLOWED_ORIGINS is not set)
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
@@ -31,48 +50,93 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 204
 }));
 
+// Optional persistent session store for production
+let SQLiteStore;
+try {
+  SQLiteStore = require('connect-sqlite3')(session);
+} catch (e) {
+  console.warn('connect-sqlite3 not installed; falling back to in-memory session store.');
+}
+const SESSION_DIR = path.resolve(process.env.SESSION_DIR || path.join(__dirname, 'sessions'));
+if (SQLiteStore) {
+  fs.ensureDirSync(SESSION_DIR);
+}
+
 // Session configuration
+let sessionStore;
+if (SQLiteStore) {
+  // Use a proper sqlite3.Database connection for connect-sqlite3
+  const SESSION_DB_PATH = path.join(SESSION_DIR, process.env.SESSION_DB || 'sessions.sqlite');
+  const sessionDbConn = new sqlite3.Database(SESSION_DB_PATH);
+  sessionStore = new SQLiteStore({
+    db: sessionDbConn,
+    table: 'sessions',
+    concurrentDB: true // enable WAL mode for better concurrency
+  });
+}
+
 app.use(session({
+  name: process.env.SESSION_NAME || 'erp.sid',
   secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
   resave: false,
   saveUninitialized: false,
+  proxy: true, // trust proxy headers for secure cookies
+  rolling: true, // refresh cookie expiry on activity
+  store: sessionStore,
   cookie: {
+    httpOnly: true,
     secure: process.env.SESSION_SECURE === 'true', // Set to true in production with HTTPS
+    sameSite: process.env.SESSION_SAME_SITE || 'lax',
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
 
 // Middleware
 app.use(express.json());
-app.use(express.static('public'));
-app.use('/uploads', express.static('uploads'));
 
-// Ensure uploads directory and subdirectories exist
-const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads';
+// Resolve and ensure upload directories before registering static route
+const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, 'uploads'));
 fs.ensureDirSync(UPLOAD_DIR);
 fs.ensureDirSync(path.join(UPLOAD_DIR, 'queries'));
 fs.ensureDirSync(path.join(UPLOAD_DIR, 'quotations'));
 fs.ensureDirSync(path.join(UPLOAD_DIR, 'purchase_orders'));
 fs.ensureDirSync(path.join(UPLOAD_DIR, 'invoices'));
 fs.ensureDirSync(path.join(UPLOAD_DIR, 'attachments'));
+app.use(express.static('public'));
+app.use('/uploads', express.static(UPLOAD_DIR));
+
+// Upload directories ensured above
 
 // Function to determine upload destination based on request context
 function getUploadDestination(req, file) {
   const url = req.originalUrl || req.url;
-  
+  const baseDir = UPLOAD_DIR;
+
   if (url.includes('/queries') || url.includes('/query')) {
-    return 'uploads/queries/';
+    return path.join(baseDir, 'queries');
   } else if (url.includes('/quotations') || url.includes('/quotation')) {
-    return 'uploads/quotations/';
+    return path.join(baseDir, 'quotations');
   } else if (url.includes('/purchase-orders') || url.includes('/purchase_order')) {
-    return 'uploads/purchase_orders/';
+    return path.join(baseDir, 'purchase_orders');
   } else if (url.includes('/invoices') || url.includes('/invoice')) {
-    return 'uploads/invoices/';
+    return path.join(baseDir, 'invoices');
   } else {
-    return 'uploads/attachments/';
+    return path.join(baseDir, 'attachments');
+  }
+}
+
+// Convert an absolute file path inside UPLOAD_DIR to a web path served under /uploads
+function toWebPath(absolutePath) {
+  try {
+    const relative = path.relative(UPLOAD_DIR, absolutePath);
+    // Ensure forward slashes for URLs across platforms
+    return path.join('uploads', relative).replace(/\\/g, '/');
+  } catch (e) {
+    return absolutePath;
   }
 }
 
@@ -488,7 +552,7 @@ app.post('/api/queries', requireAuth, checkPermission('queries'), upload.single(
     items
   } = req.body;
 
-  const attachment_path = req.file ? req.file.path : null;
+  const attachment_path = req.file ? toWebPath(req.file.path) : null;
 
   const query = `INSERT INTO queries (
     org_department, client_case_number, date, last_submission_date,
@@ -536,7 +600,7 @@ app.post('/api/queries', requireAuth, checkPermission('queries'), upload.single(
     }
 
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'create', 'query', queryId, `Query ${queryId}`, attachment_path, req.file ? req.file.filename : null, 'Query created', req);
+    logActivity(req.session.userId, req.session.username, 'create', 'query', queryId, `Query ${queryId}`, attachment_path, req.file ? req.file.filename : null, 'Query created', req);
     
     res.json({ id: queryId, message: 'Query created successfully' });
   });
@@ -561,7 +625,7 @@ app.put('/api/queries/:id', requireAuth, checkPermission('queries'), upload.sing
 
   let attachment_path = req.body.existing_attachment;
   if (req.file) {
-    attachment_path = req.file.path;
+    attachment_path = toWebPath(req.file.path);
   }
 
   const query = `UPDATE queries SET 
@@ -607,7 +671,7 @@ app.put('/api/queries/:id', requireAuth, checkPermission('queries'), upload.sing
     }
 
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'update', 'query', queryId, `Query ${queryId}`, attachment_path, req.file ? req.file.filename : null, 'Query updated', req);
+    logActivity(req.session.userId, req.session.username, 'update', 'query', queryId, `Query ${queryId}`, attachment_path, req.file ? req.file.filename : null, 'Query updated', req);
     
     res.json({ message: 'Query updated successfully' });
   });
@@ -623,7 +687,7 @@ app.delete('/api/queries/:id', requireAuth, checkPermission('queries'), (req, re
       return;
     }
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'delete', 'query', queryId, `Query ${queryId}`, null, null, 'Query deleted', req);
+  logActivity(req.session.userId, req.session.username, 'delete', 'query', queryId, `Query ${queryId}`, null, null, 'Query deleted', req);
     
     res.json({ message: 'Query deleted successfully' });
   });
@@ -699,7 +763,7 @@ app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), uplo
                 // Check if there's a file for this supplier
                 const fileFieldName = `supplier_attachment_${index}`;
                 if (req.files && req.files[fileFieldName] && req.files[fileFieldName][0]) {
-                  attachmentPath = req.files[fileFieldName][0].path;
+                  attachmentPath = toWebPath(req.files[fileFieldName][0].path);
                 }
                 
                 db.run(insertQuery, [queryId, response.supplier, response.response, attachmentPath], (err) => {
@@ -733,7 +797,7 @@ app.post('/api/queries/:id/supplier-attachment', requireAuth, checkPermission('q
     return res.status(400).json({ error: 'No file uploaded' });
   }
   
-  const attachmentPath = req.file.path;
+  const attachmentPath = toWebPath(req.file.path);
   
   res.json({ 
     message: 'Attachment uploaded successfully',
@@ -809,12 +873,12 @@ app.get('/api/queries/:id/excel', requireAuth, checkPermission('queries'), async
 
     // Generate Excel file
     const filename = `query_${queryId}_${Date.now()}.xlsx`;
-    const filepath = path.join('uploads/queries', filename);
+    const filepath = path.join(UPLOAD_DIR, 'queries', filename);
     
     await workbook.xlsx.writeFile(filepath);
     
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'export', 'query', queryId, `Query ${queryId}`, filepath, filename, 'Excel export', req);
+    logActivity(req.session.userId, req.session.username, 'export', 'query', queryId, `Query ${queryId}`, filepath, filename, 'Excel export', req);
     
     res.download(filepath, filename);
   } catch (error) {
@@ -937,7 +1001,7 @@ app.post('/api/quotations', requireAuth, checkPermission('quotations'), (req, re
 
       items.forEach((item, index) => {
         db.run(itemQuery, [
-          quotationId, index + 1, item.manufacturer_number, item.stockist_number,
+          quotationId, index + 1, item.manufacturer_number, item.stockist_number, item.coo, item.brand,
           item.description, item.au, item.quantity, item.unit_price, item.total_price,
           item.supplier_price, item.profit_factor, item.exchange_rate, item.supplier_up
         ]);
@@ -945,7 +1009,7 @@ app.post('/api/quotations', requireAuth, checkPermission('quotations'), (req, re
     }
 
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'create', 'quotation', quotationId, `Quotation ${quotationId}`, attachment, null, 'Quotation created', req);
+    logActivity(req.session.userId, req.session.username, 'create', 'quotation', quotationId, `Quotation ${quotationId}`, attachment, null, 'Quotation created', req);
     
     res.json({ id: quotationId, message: 'Quotation created successfully' });
   });
@@ -1014,7 +1078,7 @@ app.put('/api/quotations/:id', requireAuth, checkPermission('quotations'), (req,
     }
 
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'update', 'quotation', quotationId, `Quotation ${quotationId}`, attachment, null, 'Quotation updated', req);
+    logActivity(req.session.userId, req.session.username, 'update', 'quotation', quotationId, `Quotation ${quotationId}`, attachment, null, 'Quotation updated', req);
     
     res.json({ message: 'Quotation updated successfully' });
   });
@@ -1030,7 +1094,7 @@ app.delete('/api/quotations/:id', requireAuth, checkPermission('quotations'), (r
       return;
     }
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'delete', 'quotation', quotationId, `Quotation ${quotationId}`, null, null, 'Quotation deleted', req);
+  logActivity(req.session.userId, req.session.username, 'delete', 'quotation', quotationId, `Quotation ${quotationId}`, null, null, 'Quotation deleted', req);
     
     res.json({ message: 'Quotation deleted successfully' });
   });
@@ -1116,12 +1180,12 @@ app.get('/api/quotations/:id/excel', requireAuth, checkPermission('quotations'),
 
     // Generate Excel file
     const filename = `quotation_${quotationId}_${Date.now()}.xlsx`;
-    const filepath = path.join('uploads/quotations', filename);
+    const filepath = path.join(UPLOAD_DIR, 'quotations', filename);
     
     await workbook.xlsx.writeFile(filepath);
     
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'export', 'quotation', quotationId, `Quotation ${quotationId}`, filepath, filename, 'Excel export', req);
+    logActivity(req.session.userId, req.session.username, 'export', 'quotation', quotationId, `Quotation ${quotationId}`, filepath, filename, 'Excel export', req);
     
     res.download(filepath, filename);
   } catch (error) {
@@ -1230,7 +1294,7 @@ app.post('/api/purchase-orders', requireAuth, checkPermission('purchase_orders')
     }
     
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'create', 'purchase_order', purchaseOrderId, `Purchase Order ${purchaseOrderId}`, null, null, 'Purchase order created', req);
+    logActivity(req.session.userId, req.session.username, 'create', 'purchase_order', purchaseOrderId, `Purchase Order ${purchaseOrderId}`, null, null, 'Purchase order created', req);
     
     res.json({ id: purchaseOrderId, message: 'Purchase order created successfully' });
   });
@@ -1289,7 +1353,7 @@ app.put('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_order
       }
       
       // Log activity
-      logActivity(req.session.user.id, req.session.user.username, 'update', 'purchase_order', id, `Purchase Order ${id}`, null, null, 'Purchase order updated', req);
+    logActivity(req.session.userId, req.session.username, 'update', 'purchase_order', id, `Purchase Order ${id}`, null, null, 'Purchase order updated', req);
       
       res.json({ message: 'Purchase order updated successfully' });
     });
@@ -1315,7 +1379,7 @@ app.delete('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_or
       }
       
       // Log activity
-      logActivity(req.session.user.id, req.session.user.username, 'delete', 'purchase_order', id, `Purchase Order ${id}`, null, null, 'Purchase order deleted', req);
+  logActivity(req.session.userId, req.session.username, 'delete', 'purchase_order', id, `Purchase Order ${id}`, null, null, 'Purchase order deleted', req);
       
       res.json({ message: 'Purchase order deleted successfully' });
     });
@@ -1422,12 +1486,12 @@ app.get('/api/purchase-orders/:id/excel', requireAuth, checkPermission('purchase
 
     // Generate Excel file
     const filename = `purchase_order_${poId}_${Date.now()}.xlsx`;
-    const filepath = path.join('uploads/purchase_orders', filename);
+    const filepath = path.join(UPLOAD_DIR, 'purchase_orders', filename);
     
     await workbook.xlsx.writeFile(filepath);
     
     // Log activity
-    logActivity(req.session.user.id, req.session.user.username, 'export', 'purchase_order', poId, `Purchase Order ${poId}`, filepath, filename, 'Excel export', req);
+    logActivity(req.session.userId, req.session.username, 'export', 'purchase_order', poId, `Purchase Order ${poId}`, filepath, filename, 'Excel export', req);
     
     res.download(filepath, filename);
   } catch (error) {
@@ -1483,35 +1547,71 @@ function checkPermission(permission) {
 
 // Authentication endpoints
 app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  
+  const { username, password } = req.body || {};
+
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
   }
-  
+
   db.get('SELECT * FROM users WHERE username = ? AND is_active = 1', [username], (err, user) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    
-    if (!user || !bcrypt.compareSync(password, user.password)) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.role = user.role;
-    
-    res.json({ 
-      message: 'Login successful',
-      user: {
-        id: user.id,
-        username: user.username,
-        full_name: user.full_name,
-        role: user.role,
-        permissions: JSON.parse(user.permissions)
+
+    try {
+      let validPassword = false;
+      try {
+        validPassword = !!(user && bcrypt.compareSync(password, user.password));
+      } catch (e) {
+        // Handle legacy or malformed password hashes gracefully
+        console.error('bcrypt compare failed for user', username, e);
+        validPassword = false;
       }
-    });
+
+      if (!validPassword) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // Defensive check for session middleware
+      if (!req.session) {
+        console.error('Session middleware not initialized for login request');
+        return res.status(500).json({ error: 'Session not initialized' });
+      }
+
+      // Regenerate session to prevent fixation
+      req.session.regenerate((regenErr) => {
+        if (regenErr) {
+          console.error('Session regeneration error for user', username, regenErr);
+          return res.status(500).json({ error: 'Login failed' });
+        }
+
+        req.session.userId = user.id;
+        req.session.username = user.username;
+        req.session.role = user.role;
+
+        let permissions = {};
+        try {
+          permissions = JSON.parse(user.permissions || '{}');
+        } catch (e) {
+          console.error('Invalid permissions JSON for user', user.username, e);
+          permissions = {};
+        }
+
+        return res.json({
+          message: 'Login successful',
+          user: {
+            id: user.id,
+            username: user.username,
+            full_name: user.full_name,
+            role: user.role,
+            permissions
+          }
+        });
+      });
+    } catch (unexpectedErr) {
+      console.error('Unexpected server error during /api/login:', unexpectedErr);
+      return res.status(500).json({ error: 'Unexpected server error during login' });
+    }
   });
 });
 
@@ -1520,28 +1620,47 @@ app.post('/api/logout', (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Logout failed' });
     }
+    try {
+      const cookieName = process.env.SESSION_NAME || 'erp.sid';
+      res.clearCookie(cookieName, {
+        path: '/',
+        httpOnly: true,
+        sameSite: process.env.SESSION_SAME_SITE || 'lax',
+        secure: process.env.SESSION_SECURE === 'true'
+      });
+    } catch (e) {
+      console.warn('Failed to clear session cookie on logout:', e);
+    }
     res.json({ message: 'Logout successful' });
   });
 });
 
 app.get('/api/auth/check', (req, res) => {
-  if (!req.session.userId) {
+  if (!req.session || !req.session.userId) {
     return res.status(401).json({ authenticated: false });
   }
-  
+
   db.get('SELECT id, username, full_name, role, permissions FROM users WHERE id = ? AND is_active = 1', [req.session.userId], (err, user) => {
     if (err || !user) {
       return res.status(401).json({ authenticated: false });
     }
-    
-    res.json({ 
+
+    let permissions = {};
+    try {
+      permissions = JSON.parse(user.permissions || '{}');
+    } catch (e) {
+      console.error('Invalid permissions JSON in auth check for user', user.username, e);
+      permissions = {};
+    }
+
+    return res.json({
       authenticated: true,
       user: {
         id: user.id,
         username: user.username,
         full_name: user.full_name,
         role: user.role,
-        permissions: JSON.parse(user.permissions)
+        permissions
       }
     });
   });
@@ -1645,75 +1764,96 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
   });
 });
 
-// System administration endpoints
-app.post('/api/admin/backup', requireAdmin, (req, res) => {
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const archiver = require('archiver');
-    const backupDir = path.join(__dirname, 'backups');
-    
-    // Create backups directory if it doesn't exist
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir);
-    }
-    
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupFileName = `erp_full_backup_${timestamp}.zip`;
-    const backupPath = path.join(backupDir, backupFileName);
-    
-    // Create a file to stream archive data to
-    const output = fs.createWriteStream(backupPath);
-    const archive = archiver('zip', {
-      zlib: { level: 9 } // Sets the compression level
-    });
-    
-    // Listen for all archive data to be written
-    output.on('close', function() {
-      const backupSize = (archive.pointer() / 1024 / 1024).toFixed(2); // Size in MB
-      
-      // Log activity
-      logActivity(req.session.user.id, req.session.user.username, 'backup', 'system', null, 'Full System Backup', backupPath, backupFileName, `System backup created (${backupSize} MB)`, req);
-      
-      res.json({ 
-        message: 'Full system backup created successfully',
-        backupFile: backupFileName,
-        backupSize: `${backupSize} MB`,
-        timestamp: new Date().toISOString()
+// Reusable full backup creator
+function createFullBackup(initiator = { userId: null, username: 'system' }) {
+  return new Promise((resolve, reject) => {
+    try {
+      const backupDir = path.resolve(process.env.BACKUP_DIR || path.join(__dirname, 'backups'));
+      fs.ensureDirSync(backupDir);
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupFileName = `erp_full_backup_${timestamp}.zip`;
+      const backupPath = path.join(backupDir, backupFileName);
+
+      const output = fs.createWriteStream(backupPath);
+      const archive = archiver('zip', { zlib: { level: 9 } });
+
+      output.on('close', () => {
+        const backupSizeMB = (archive.pointer() / 1024 / 1024).toFixed(2);
+        resolve({ backupPath, backupFileName, backupSizeMB });
       });
-    });
-    
-    // Handle errors
-    archive.on('error', function(err) {
-      console.error('Archive error:', err);
-      res.status(500).json({ error: 'Failed to create backup archive' });
-    });
-    
-    // Pipe archive data to the file
-    archive.pipe(output);
-    
-    // Add database file
-    archive.file(path.join(__dirname, 'erp_system.db'), { name: 'erp_system.db' });
-    
-    // Add uploads folder with all subfolders
-    const uploadsDir = path.join(__dirname, 'uploads');
-    if (fs.existsSync(uploadsDir)) {
-      archive.directory(uploadsDir, 'uploads');
+
+      archive.on('error', (err) => {
+        reject(err);
+      });
+
+      archive.pipe(output);
+
+      // Database file
+      archive.file(path.resolve(DB_PATH), { name: path.basename(DB_PATH) });
+
+      // Uploads directory
+      if (fs.existsSync(UPLOAD_DIR)) {
+        archive.directory(UPLOAD_DIR, 'uploads');
+      }
+
+      // Public directory
+      archive.directory(path.join(__dirname, 'public'), 'public');
+
+      // Source files
+      archive.file(path.join(__dirname, 'server.js'), { name: 'server.js' });
+      archive.file(path.join(__dirname, 'package.json'), { name: 'package.json' });
+      if (fs.existsSync(path.join(__dirname, 'package-lock.json'))) {
+        archive.file(path.join(__dirname, 'package-lock.json'), { name: 'package-lock.json' });
+      }
+
+      archive.finalize();
+    } catch (err) {
+      reject(err);
     }
-    
-    // Add public folder (excluding node_modules if any)
-    archive.directory(path.join(__dirname, 'public'), 'public');
-    
-    // Add server.js and package files
-    archive.file(path.join(__dirname, 'server.js'), { name: 'server.js' });
-    archive.file(path.join(__dirname, 'package.json'), { name: 'package.json' });
-    if (fs.existsSync(path.join(__dirname, 'package-lock.json'))) {
-      archive.file(path.join(__dirname, 'package-lock.json'), { name: 'package-lock.json' });
+  });
+}
+
+function pruneOldBackups(retentionDays = 30) {
+  try {
+    const backupDir = path.resolve(process.env.BACKUP_DIR || path.join(__dirname, 'backups'));
+    if (!fs.existsSync(backupDir)) return { pruned: 0 };
+
+    const now = Date.now();
+    const cutoff = retentionDays * 24 * 60 * 60 * 1000;
+    const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.zip'));
+
+    let pruned = 0;
+    for (const file of files) {
+      const fullPath = path.join(backupDir, file);
+      const stats = fs.statSync(fullPath);
+      const age = now - stats.mtimeMs;
+      if (age > cutoff) {
+        fs.unlinkSync(fullPath);
+        pruned++;
+      }
     }
-    
-    // Finalize the archive
-    archive.finalize();
-    
+    return { pruned };
+  } catch (err) {
+    console.error('Error pruning backups:', err);
+    return { pruned: 0, error: err.message };
+  }
+}
+
+// System administration endpoints
+app.post('/api/admin/backup', requireAdmin, async (req, res) => {
+  try {
+    const result = await createFullBackup({ userId: req.session.userId, username: req.session.username });
+    const { backupPath, backupFileName, backupSizeMB } = result;
+
+    logActivity(req.session.userId, req.session.username, 'backup', 'system', null, 'Full System Backup', backupPath, backupFileName, `System backup created (${backupSizeMB} MB)`, req);
+
+    res.json({ 
+      message: 'Full system backup created successfully',
+      backupFile: backupFileName,
+      backupSize: `${backupSizeMB} MB`,
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
     console.error('Backup error:', error);
     res.status(500).json({ error: 'Failed to create backup' });
@@ -1722,17 +1862,41 @@ app.post('/api/admin/backup', requireAdmin, (req, res) => {
 
 app.post('/api/admin/clear-sessions', requireAdmin, (req, res) => {
   try {
-    // Clear old sessions (older than 7 days)
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    
-    db.run('DELETE FROM sessions WHERE created_at < ?', [sevenDaysAgo], function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
+    // Prune expired sessions from the persistent session store (if configured)
+    const SESSION_DB_PATH = path.join(
+      path.resolve(process.env.SESSION_DIR || path.join(__dirname, 'sessions')),
+      process.env.SESSION_DB || 'sessions.sqlite'
+    );
+
+    const sessionDb = new sqlite3.Database(SESSION_DB_PATH);
+    const nowMs = Date.now();
+
+    // Detect the expiry column name dynamically to support different store schemas
+    sessionDb.all('PRAGMA table_info(sessions)', (pragmaErr, columns) => {
+      if (pragmaErr) {
+        sessionDb.close();
+        return res.status(500).json({ error: pragmaErr.message });
       }
-      
-      res.json({ 
-        message: 'Old sessions cleared successfully',
-        deletedCount: this.changes
+
+      const colNames = (columns || []).map(c => c.name.toLowerCase());
+      const expiryCol = ['expires', 'expiry', 'expiration', 'expire'].find(name => colNames.includes(name));
+      if (!expiryCol) {
+        sessionDb.close();
+        return res.status(500).json({ error: 'Unable to determine expiry column in sessions table' });
+      }
+
+      sessionDb.run(`DELETE FROM sessions WHERE ${expiryCol} < ?`, [nowMs], function(err) {
+        if (err) {
+          sessionDb.close();
+          return res.status(500).json({ error: err.message });
+        }
+        const deleted = this.changes || 0;
+        sessionDb.close();
+        res.json({ 
+          message: 'Expired sessions pruned successfully',
+          deletedCount: deleted,
+          expiryColumn: expiryCol
+        });
       });
     });
   } catch (error) {
@@ -1870,6 +2034,21 @@ setInterval(() => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   db.run('DELETE FROM queries WHERE deleted_at IS NOT NULL AND deleted_at < ?', [thirtyDaysAgo]);
 }, 24 * 60 * 60 * 1000); // Run daily
+
+// Optional automated backups
+const AUTO_BACKUP_INTERVAL = parseInt(process.env.AUTO_BACKUP_INTERVAL || '0', 10);
+if (AUTO_BACKUP_INTERVAL > 0) {
+  setInterval(async () => {
+    try {
+      const { backupPath, backupFileName, backupSizeMB } = await createFullBackup({ userId: null, username: 'system' });
+      const { pruned } = pruneOldBackups(30);
+      logActivity(null, 'system', 'auto_backup', 'system', null, 'Automated System Backup', backupPath, backupFileName, `Automated backup created (${backupSizeMB} MB). Old backups pruned: ${pruned}`);
+      console.log(`Automated backup created: ${backupFileName} (${backupSizeMB} MB). Pruned: ${pruned}`);
+    } catch (err) {
+      console.error('Automated backup failed:', err);
+    }
+  }, AUTO_BACKUP_INTERVAL);
+}
 
 app.listen(PORT, () => {
   console.log(`ERP System server running on port ${PORT}`);

@@ -9,6 +9,7 @@ const bcrypt = require('bcrypt');
 const session = require('express-session');
 const crypto = require('crypto');
 const archiver = require('archiver');
+const rateLimit = require('express-rate-limit');
 // Load environment variables from .env if present
 try {
   require('dotenv').config();
@@ -18,6 +19,9 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10);
+const CSRF_ENABLED = process.env.CSRF_ENABLED === 'true';
+const REQUIRE_CORS_ORIGINS = process.env.REQUIRE_CORS_ORIGINS === 'true';
 
 // Trust reverse proxy (e.g., Apache/Nginx) so secure cookies work behind HTTPS terminator
 // Default to 1 hop; override with TRUST_PROXY env if needed
@@ -37,14 +41,25 @@ try {
   app.set('trust proxy', 1);
 }
 
-// CORS configuration (allow all if ALLOWED_ORIGINS is not set)
+// CORS configuration (tighten with REQUIRE_CORS_ORIGINS toggle)
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+    // Allow non-CORS requests (no Origin header)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    // If strict enforcement disabled, allow all origins (legacy behavior)
+    if (!REQUIRE_CORS_ORIGINS) {
+      callback(null, true);
+      return;
+    }
+    // Strict enforcement: only allow configured origins
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -175,6 +190,15 @@ const upload = multer({
 // Database initialization
   const DB_PATH = process.env.DB_PATH || 'erp_system.db';
   const db = new sqlite3.Database(DB_PATH);
+  // Improve concurrency and durability for SQLite
+  db.serialize(() => {
+    try {
+      db.run('PRAGMA journal_mode=WAL');
+      db.run('PRAGMA synchronous=NORMAL');
+    } catch (e) {
+      console.warn('Failed to set SQLite PRAGMAs:', e.message);
+    }
+  });
 
 // Create tables
 db.serialize(() => {
@@ -394,8 +418,6 @@ db.serialize(() => {
     if (!err && row.count === 0) {
       const DEFAULT_ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'Shahzad';
       const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'NSets123';
-      const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10);
-
       const hashedPassword = bcrypt.hashSync(DEFAULT_ADMIN_PASSWORD, BCRYPT_ROUNDS);
       const adminPermissions = JSON.stringify({
         queries: true,
@@ -473,6 +495,44 @@ function logActivity(userId, username, action, entityType, entityId = null, enti
 
 // Routes
 
+// CSRF helpers
+function ensureCsrf(req) {
+  if (!req.session) return null;
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+  }
+  return req.session.csrfToken;
+}
+
+function requireCsrf(req, res, next) {
+  if (!CSRF_ENABLED) return next();
+  try {
+    const token = req.headers['x-csrf-token'];
+    const sessionToken = req.session ? req.session.csrfToken : null;
+    if (!token || !sessionToken || token !== sessionToken) {
+      return res.status(403).json({ error: 'Invalid CSRF token' });
+    }
+    next();
+  } catch (e) {
+    return res.status(403).json({ error: 'CSRF validation failed' });
+  }
+}
+
+// Rate limiters
+const loginLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_LOGIN_MAX || '10', 10),
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const writeLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_WRITE_MAX || '300', 10),
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 // Get all queries
 app.get('/api/queries', requireAuth, checkPermission('queries'), (req, res) => {
   const { status, deleted } = req.query;
@@ -538,7 +598,7 @@ app.get('/api/queries/:id', requireAuth, checkPermission('queries'), (req, res) 
 });
 
 // Create new query
-app.post('/api/queries', requireAuth, checkPermission('queries'), upload.single('attachment'), (req, res) => {
+app.post('/api/queries', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.single('attachment'), (req, res) => {
   const {
     org_department,
     client_case_number,
@@ -607,7 +667,7 @@ app.post('/api/queries', requireAuth, checkPermission('queries'), upload.single(
 });
 
 // Update query
-app.put('/api/queries/:id', requireAuth, checkPermission('queries'), upload.single('attachment'), (req, res) => {
+app.put('/api/queries/:id', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.single('attachment'), (req, res) => {
   const queryId = req.params.id;
   const {
     org_department,
@@ -678,7 +738,7 @@ app.put('/api/queries/:id', requireAuth, checkPermission('queries'), upload.sing
 });
 
 // Delete query (soft delete)
-app.delete('/api/queries/:id', requireAuth, checkPermission('queries'), (req, res) => {
+app.delete('/api/queries/:id', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, (req, res) => {
   const queryId = req.params.id;
   
   db.run('UPDATE queries SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [queryId], function(err) {
@@ -694,7 +754,7 @@ app.delete('/api/queries/:id', requireAuth, checkPermission('queries'), (req, re
 });
 
 // Update query status with file uploads
-app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), upload.fields([
+app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.fields([
   { name: 'supplier_attachment_0', maxCount: 1 },
   { name: 'supplier_attachment_1', maxCount: 1 },
   { name: 'supplier_attachment_2', maxCount: 1 },
@@ -789,7 +849,7 @@ app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), uplo
 });
 
 // Upload supplier response attachment
-app.post('/api/queries/:id/supplier-attachment', requireAuth, checkPermission('queries'), upload.single('attachment'), (req, res) => {
+app.post('/api/queries/:id/supplier-attachment', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.single('attachment'), (req, res) => {
   const queryId = req.params.id;
   const { supplier_name } = req.body;
   
@@ -955,7 +1015,7 @@ app.get('/api/quotations/:id', requireAuth, checkPermission('quotations'), (req,
 });
 
 // Create new quotation
-app.post('/api/quotations', requireAuth, checkPermission('quotations'), (req, res) => {
+app.post('/api/quotations', requireAuth, checkPermission('quotations'), requireCsrf, writeLimiter, (req, res) => {
   const {
     quotation_number,
     date,
@@ -1016,7 +1076,7 @@ app.post('/api/quotations', requireAuth, checkPermission('quotations'), (req, re
 });
 
 // Update quotation
-app.put('/api/quotations/:id', requireAuth, checkPermission('quotations'), (req, res) => {
+app.put('/api/quotations/:id', requireAuth, checkPermission('quotations'), requireCsrf, writeLimiter, (req, res) => {
   const quotationId = req.params.id;
   const {
     quotation_number,
@@ -1085,7 +1145,7 @@ app.put('/api/quotations/:id', requireAuth, checkPermission('quotations'), (req,
 });
 
 // Delete quotation
-app.delete('/api/quotations/:id', requireAuth, checkPermission('quotations'), (req, res) => {
+app.delete('/api/quotations/:id', requireAuth, checkPermission('quotations'), requireCsrf, writeLimiter, (req, res) => {
   const quotationId = req.params.id;
   
   db.run('DELETE FROM quotations WHERE id = ?', [quotationId], function(err) {
@@ -1250,7 +1310,7 @@ app.get('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_order
 });
 
 // Create new purchase order
-app.post('/api/purchase-orders', requireAuth, checkPermission('purchase_orders'), (req, res) => {
+app.post('/api/purchase-orders', requireAuth, checkPermission('purchase_orders'), requireCsrf, writeLimiter, (req, res) => {
   const { po_number, date, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total, items } = req.body;
   
   const sql = `INSERT INTO purchase_orders (po_number, date, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total) 
@@ -1301,7 +1361,7 @@ app.post('/api/purchase-orders', requireAuth, checkPermission('purchase_orders')
 });
 
 // Update purchase order
-app.put('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_orders'), (req, res) => {
+app.put('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_orders'), requireCsrf, writeLimiter, (req, res) => {
   const { id } = req.params;
   const { po_number, date, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total, items } = req.body;
   
@@ -1361,7 +1421,7 @@ app.put('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_order
 });
 
 // Delete purchase order
-app.delete('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_orders'), (req, res) => {
+app.delete('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_orders'), requireCsrf, writeLimiter, (req, res) => {
   const { id } = req.params;
   
   // Delete items first
@@ -1546,7 +1606,7 @@ function checkPermission(permission) {
 }
 
 // Authentication endpoints
-app.post('/api/login', (req, res) => {
+app.post('/api/login', loginLimiter, (req, res) => {
   const { username, password } = req.body || {};
 
   if (!username || !password) {
@@ -1589,12 +1649,31 @@ app.post('/api/login', (req, res) => {
         req.session.username = user.username;
         req.session.role = user.role;
 
+        // Ensure CSRF token for this session
+        const csrfToken = ensureCsrf(req);
+
         let permissions = {};
         try {
           permissions = JSON.parse(user.permissions || '{}');
         } catch (e) {
           console.error('Invalid permissions JSON for user', user.username, e);
           permissions = {};
+        }
+
+        // Opportunistic password hash migration to stronger cost
+        try {
+          const parts = (user.password || '').split('$');
+          const cost = parseInt(parts[2], 10);
+          if (Number.isInteger(cost) && cost < BCRYPT_ROUNDS) {
+            const newHash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+            db.run('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newHash, user.id], (updateErr) => {
+              if (updateErr) {
+                console.warn('Failed to migrate password hash for user', user.username, updateErr.message);
+              }
+            });
+          }
+        } catch (migErr) {
+          console.warn('Password migration check failed:', migErr.message);
         }
 
         return res.json({
@@ -1605,7 +1684,8 @@ app.post('/api/login', (req, res) => {
             full_name: user.full_name,
             role: user.role,
             permissions
-          }
+          },
+          csrfToken
         });
       });
     } catch (unexpectedErr) {
@@ -1615,7 +1695,7 @@ app.post('/api/login', (req, res) => {
   });
 });
 
-app.post('/api/logout', (req, res) => {
+app.post('/api/logout', requireCsrf, (req, res) => {
   req.session.destroy((err) => {
     if (err) {
       return res.status(500).json({ error: 'Logout failed' });
@@ -1666,6 +1746,12 @@ app.get('/api/auth/check', (req, res) => {
   });
 });
 
+// CSRF token endpoint (for authenticated sessions)
+app.get('/api/csrf-token', requireAuth, (req, res) => {
+  const token = ensureCsrf(req);
+  res.json({ csrfToken: token });
+});
+
 // User management endpoints (admin only)
 app.get('/api/users', requireAdmin, (req, res) => {
   db.all('SELECT id, username, email, full_name, role, permissions, is_active, created_at FROM users ORDER BY created_at DESC', (err, users) => {
@@ -1682,14 +1768,14 @@ app.get('/api/users', requireAdmin, (req, res) => {
   });
 });
 
-app.post('/api/users', requireAdmin, (req, res) => {
+app.post('/api/users', requireAdmin, writeLimiter, (req, res) => {
   const { username, password, email, full_name, role, permissions } = req.body;
   
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
   }
   
-  const hashedPassword = bcrypt.hashSync(password, 10);
+  const hashedPassword = bcrypt.hashSync(password, BCRYPT_ROUNDS);
   const permissionsJson = JSON.stringify(permissions || { queries: true });
   
   db.run('INSERT INTO users (username, password, email, full_name, role, permissions) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1707,7 +1793,7 @@ app.post('/api/users', requireAdmin, (req, res) => {
   );
 });
 
-app.put('/api/users/:id', requireAdmin, (req, res) => {
+app.put('/api/users/:id', requireAdmin, writeLimiter, (req, res) => {
   const { id } = req.params;
   const { email, full_name, role, permissions, is_active } = req.body;
   
@@ -1725,7 +1811,7 @@ app.put('/api/users/:id', requireAdmin, (req, res) => {
   );
 });
 
-app.put('/api/users/:id/password', requireAdmin, (req, res) => {
+app.put('/api/users/:id/password', requireAdmin, writeLimiter, (req, res) => {
   const { id } = req.params;
   const { password } = req.body;
   
@@ -1733,7 +1819,7 @@ app.put('/api/users/:id/password', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Password required' });
   }
   
-  const hashedPassword = bcrypt.hashSync(password, 10);
+  const hashedPassword = bcrypt.hashSync(password, BCRYPT_ROUNDS);
   
   db.run('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     [hashedPassword, id],
@@ -1747,7 +1833,7 @@ app.put('/api/users/:id/password', requireAdmin, (req, res) => {
   );
 });
 
-app.delete('/api/users/:id', requireAdmin, (req, res) => {
+app.delete('/api/users/:id', requireAdmin, writeLimiter, (req, res) => {
   const { id } = req.params;
   
   // Don't allow deleting the current user

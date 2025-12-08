@@ -612,3 +612,102 @@ sudo systemctl status nginx
 - [ ] Quarterly: Security audit
 
 This comprehensive guide should help you successfully deploy and maintain your ERP system on Hostinger hosting services.
+
+## HTTPS on `portal.chipmart.pk` (Nginx)
+
+Below is a production-ready Nginx configuration to serve your ERP app over HTTPS on `portal.chipmart.pk`, proxying to the Node app on `PORT=4001` and serving `/uploads/` directly from disk.
+
+```nginx
+# Redirect all HTTP to HTTPS
+server {
+    listen 80;
+    server_name portal.chipmart.pk;
+    return 301 https://$server_name$request_uri;
+}
+
+# Primary HTTPS server
+server {
+    listen 443 ssl http2;
+    server_name portal.chipmart.pk;
+
+    # TLS (Certbot paths)
+    ssl_certificate /etc/letsencrypt/live/portal.chipmart.pk/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/portal.chipmart.pk/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    add_header Content-Security-Policy "default-src 'self' https: http: data: blob: 'unsafe-inline'" always;
+
+    # Reverse proxy to Node app
+    location / {
+        proxy_pass http://127.0.0.1:4001; # matches PORT in .env
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        client_max_body_size 50M;
+    }
+
+    # Serve uploads directly
+    location /uploads/ {
+        alias /var/www/erp-system/uploads/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+```
+
+### Issue/renew TLS with Certbot
+
+```bash
+sudo apt install certbot python3-certbot-nginx -y
+sudo certbot --nginx -d portal.chipmart.pk
+sudo certbot renew --dry-run
+```
+
+### Recommended `.env` for same-origin frontend (portal.chipmart.pk)
+
+```env
+# Server
+PORT=4001
+NODE_ENV=production
+TRUST_PROXY=1
+
+# Paths
+DB_PATH=/var/www/erp-system/erp_system.db
+UPLOAD_DIR=/var/www/erp-system/uploads
+BACKUP_DIR=/var/www/erp-system/backups
+AUTO_BACKUP_INTERVAL=86400000
+
+# Sessions
+SESSION_NAME=erp.sid
+SESSION_SECRET=replace-with-strong-32+char-secret
+SESSION_DIR=/var/lib/erp/sessions
+SESSION_DB=sessions.sqlite
+SESSION_SECURE=true
+SESSION_SAME_SITE=strict
+
+# Security
+BCRYPT_ROUNDS=12
+CSRF_ENABLED=false
+REQUIRE_CORS_ORIGINS=true
+RATE_LIMIT_LOGIN_MAX=10
+RATE_LIMIT_WRITE_MAX=300
+
+# CORS
+ALLOWED_ORIGINS=https://portal.chipmart.pk
+```
+
+Notes:
+- For cross-origin frontends, set `SESSION_SAME_SITE=none`, keep `SESSION_SECURE=true`, and set `CSRF_ENABLED=true`. Ensure every POST/PUT/DELETE includes `x-csrf-token`.
+- Ensure `/var/lib/erp/sessions` exists and is owned by the service user running Node.
+- The app already sets `app.set('trust proxy', 1)` so Secure cookies work behind Nginx.

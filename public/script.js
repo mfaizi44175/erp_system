@@ -1,5 +1,7 @@
 // ERP System JavaScript
 
+let csrfToken = null;
+
 let currentModule = 'queries';
 let currentQueryId = null;
 let itemCounter = 0;
@@ -11,6 +13,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
     setDefaultDates();
     setupTagInput(); // Initialize tag input system
+    initCsrfToken();
 });
 
 // Set default dates
@@ -3092,7 +3095,8 @@ async function logout() {
     try {
         const response = await fetch('/api/logout', {
             method: 'POST',
-            credentials: 'include'
+            credentials: 'include',
+            headers: csrfToken ? { 'x-csrf-token': csrfToken } : {}
         });
         
         if (response.ok) {
@@ -3927,3 +3931,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+// Initialize CSRF token
+async function initCsrfToken() {
+    try {
+        const resp = await fetch('/api/csrf-token', { credentials: 'include' });
+        if (resp.ok) {
+            const data = await resp.json();
+            csrfToken = data.csrfToken;
+        }
+    } catch (e) {
+        // If not authenticated yet, token will be fetched after login
+        console.warn('CSRF token init skipped:', e.message);
+    }
+}

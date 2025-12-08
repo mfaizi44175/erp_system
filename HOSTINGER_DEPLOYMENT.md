@@ -240,6 +240,65 @@ server {
 }
 ```
 
+#### Subdomain + Custom Port Example (Recommended)
+
+Run the ERP app on an internal port (e.g., `PORT=4001`) and serve it on a subdomain such as `erp.yourdomain.com` via Nginx:
+
+```nginx
+server {
+    listen 80;
+    server_name erp.yourdomain.com;
+
+    # After SSL is issued, uncomment to enforce HTTPS
+    # return 301 https://$server_name$request_uri;
+
+    location / {
+        proxy_pass http://127.0.0.1:4001; # matches PORT in .env
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        client_max_body_size 50M;
+    }
+
+    location /uploads/ {
+        alias /var/www/erp-system/uploads/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
+}
+```
+
+Update your `.env` accordingly:
+
+```env
+# Server
+PORT=4001
+NODE_ENV=production
+TRUST_PROXY=1
+
+# Sessions
+SESSION_NAME=erp.sid
+SESSION_SECRET=replace-with-strong-secret
+SESSION_DIR=/var/lib/erp/sessions
+SESSION_DB=sessions.sqlite
+SESSION_SECURE=true
+SESSION_SAME_SITE=strict # use 'none' if frontend is cross-origin
+
+# CORS
+ALLOWED_ORIGINS=https://erp.yourdomain.com
+```
+
 #### Session Security and .env Defaults Behind a Reverse Proxy
 
 To ensure secure, persistent sessions when running behind Nginx:

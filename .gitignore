@@ -74,3 +74,9 @@ Thumbs.db
 # Build directories
 build/
 dist/
+
+# Generated files (exports, uploads, and downloads)
+uploads/
+downloads/
+uploads/**/*
+downloads/**/*

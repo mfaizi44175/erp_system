@@ -195,10 +195,17 @@ const upload = multer({
     try {
       db.run('PRAGMA journal_mode=WAL');
       db.run('PRAGMA synchronous=NORMAL');
+      db.run('PRAGMA foreign_keys=ON');
     } catch (e) {
       console.warn('Failed to set SQLite PRAGMAs:', e.message);
     }
   });
+  // Log the resolved database path at boot for production diagnostics
+  try {
+    console.log('[BOOT] Using DB_PATH:', path.resolve(DB_PATH));
+  } catch (e) {
+    // no-op
+  }
 
 // Create tables
 db.serialize(() => {
@@ -1996,9 +2003,14 @@ app.get('/api/admin/system-info', requireAdmin, (req, res) => {
     const fs = require('fs');
     const path = require('path');
     
-    // Get database file stats
-    const dbPath = path.join(__dirname, 'erp_system.db');
-    const dbStats = fs.statSync(dbPath);
+    // Get database file stats using the configured DB_PATH
+    const dbPath = path.resolve(DB_PATH);
+    let dbStats = { size: 0, mtime: null };
+    try {
+      dbStats = fs.statSync(dbPath);
+    } catch (e) {
+      // If file does not exist yet, keep defaults
+    }
     
     // Get system info
     db.get('SELECT COUNT(*) as totalUsers FROM users', (err, userCount) => {
@@ -2020,7 +2032,8 @@ app.get('/api/admin/system-info', requireAdmin, (req, res) => {
             version: '1.0.0',
             database: {
               type: 'SQLite',
-              size: Math.round(dbStats.size / 1024) + ' KB',
+              path: dbPath,
+              size: Math.round((dbStats.size || 0) / 1024) + ' KB',
               lastModified: dbStats.mtime
             },
             statistics: {

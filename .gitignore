@@ -80,3 +80,7 @@ uploads/
 downloads/
 uploads/**/*
 downloads/**/*
+sessions/
+backups/
+sessions/**/*
+backups/**/*

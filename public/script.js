@@ -576,7 +576,13 @@ function resetQueryForm() {
 async function loadQueryForEdit(queryId) {
     try {
         const response = await fetch(`/api/queries/${queryId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const query = await response.json();
+        
+        console.log('Loaded query data:', query);
+        console.log('Query items:', query.items);
         
         // Populate form fields
         document.getElementById('query-id').value = query.id;
@@ -599,10 +605,13 @@ async function loadQueryForEdit(queryId) {
         tbody.innerHTML = '';
         itemCounter = 0;
         
-        if (query.items && query.items.length > 0) {
+        if (query.items && Array.isArray(query.items) && query.items.length > 0) {
             query.items.forEach(item => {
+                console.log('Adding item row:', item);
                 addItemRow(item);
             });
+        } else {
+            console.warn('No items found or items is not an array:', query.items);
         }
     } catch (error) {
         console.error('Error loading query for edit:', error);
@@ -677,6 +686,17 @@ function addItem(itemData = null) {
     addItemRow(itemData);
 }
 
+// Helper function to escape HTML for attribute values
+function escapeHtml(unsafe) {
+    if (unsafe == null || unsafe === undefined) return '';
+    return String(unsafe)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 // Add item row with data
 function addItemRow(itemData = null) {
     itemCounter++;
@@ -685,14 +705,14 @@ function addItemRow(itemData = null) {
     
     row.innerHTML = `
         <td class="serial-number">${itemCounter}</td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.manufacturer_number || ''}" placeholder="Manufacturer#"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.stockist_number || ''}" placeholder="Stockist#"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.coo || ''}" placeholder="COO"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.brand || ''}" placeholder="Brand"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.description || ''}" placeholder="Description"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.au || ''}" placeholder="A/U"></td>
-        <td><input type="number" class="form-control form-control-sm" value="${itemData?.quantity || ''}" placeholder="Qty" min="0"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.remarks || ''}" placeholder="Remarks"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.manufacturer_number || '')}" placeholder="Manufacturer#"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.stockist_number || '')}" placeholder="Stockist#"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.coo || '')}" placeholder="COO"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.brand || '')}" placeholder="Brand"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.description || '')}" placeholder="Description"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.au || '')}" placeholder="A/U"></td>
+        <td><input type="number" class="form-control form-control-sm" value="${escapeHtml(itemData?.quantity || '')}" placeholder="Qty" min="0"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.remarks || '')}" placeholder="Remarks"></td>
         <td>
             <button type="button" class="btn btn-sm btn-outline-danger delete-row-btn" onclick="deleteItemRow(this)">
                 <i class="fas fa-trash"></i>
@@ -1274,7 +1294,13 @@ function resetQuotationForm() {
 async function loadQuotationForEdit(quotationId) {
     try {
         const response = await fetch(`/api/quotations/${quotationId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const quotation = await response.json();
+        
+        console.log('Loaded quotation data:', quotation);
+        console.log('Quotation items:', quotation.items);
         
         // Populate form fields
         document.getElementById('quotation-id').value = quotation.id;
@@ -1295,10 +1321,13 @@ async function loadQuotationForEdit(quotationId) {
         tbody.innerHTML = '';
         quotationItemCounter = 0;
         
-        if (quotation.items && quotation.items.length > 0) {
+        if (quotation.items && Array.isArray(quotation.items) && quotation.items.length > 0) {
             quotation.items.forEach(item => {
+                console.log('Adding quotation item row:', item);
                 addQuotationItemRow(item);
             });
+        } else {
+            console.warn('No items found or items is not an array:', quotation.items);
         }
         
         // Update totals
@@ -1326,19 +1355,19 @@ function addQuotationItemRow(itemData = null) {
     
     row.innerHTML = `
         <td class="serial-number">${quotationItemCounter}</td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.manufacturer_number || ''}" placeholder="Manufacturer#"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.stockist_number || ''}" placeholder="Stockist#"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.coo || ''}" placeholder="COO"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.brand || ''}" placeholder="Brand"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.description || ''}" placeholder="Description"></td>
-        <td><input type="text" class="form-control form-control-sm" value="${itemData?.au || ''}" placeholder="A/U"></td>
-        <td><input type="number" class="form-control form-control-sm quantity-input" value="${itemData?.quantity || ''}" placeholder="Qty" min="0" onchange="calculateRowTotal(this)"></td>
-        <td><input type="number" class="form-control form-control-sm unit-price-input" value="${itemData?.unit_price || ''}" placeholder="U/P" step="0.01" min="0" onchange="calculateRowTotal(this)"></td>
-        <td><input type="number" class="form-control form-control-sm total-price-input" value="${itemData?.total_price || ''}" placeholder="T/P" step="0.01" readonly></td>
-        <td><input type="number" class="form-control form-control-sm supplier-price-input" value="${itemData?.supplier_price || ''}" placeholder="Supplier U/P" step="0.01" min="0" onchange="calculateSupplierUP(this)"></td>
-        <td><input type="number" class="form-control form-control-sm profit-factor-input" value="${itemData?.profit_factor || ''}" placeholder="Profit Factor" step="0.01" min="0" onchange="calculateSupplierUP(this)"></td>
-        <td><input type="number" class="form-control form-control-sm exchange-rate-input" value="${itemData?.exchange_rate || ''}" placeholder="Exchange Rate" step="0.01" min="0" onchange="calculateSupplierUP(this)"></td>
-        <td><input type="number" class="form-control form-control-sm supplier-up-input" value="${itemData?.supplier_up || ''}" placeholder="Calculated Price" step="0.01" readonly></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.manufacturer_number || '')}" placeholder="Manufacturer#"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.stockist_number || '')}" placeholder="Stockist#"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.coo || '')}" placeholder="COO"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.brand || '')}" placeholder="Brand"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.description || '')}" placeholder="Description"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.au || '')}" placeholder="A/U"></td>
+        <td><input type="number" class="form-control form-control-sm quantity-input" value="${escapeHtml(itemData?.quantity || '')}" placeholder="Qty" min="0" onchange="calculateRowTotal(this)"></td>
+        <td><input type="number" class="form-control form-control-sm unit-price-input" value="${escapeHtml(itemData?.unit_price || '')}" placeholder="U/P" step="0.01" min="0" onchange="calculateRowTotal(this)"></td>
+        <td><input type="number" class="form-control form-control-sm total-price-input" value="${escapeHtml(itemData?.total_price || '')}" placeholder="T/P" step="0.01" readonly></td>
+        <td><input type="number" class="form-control form-control-sm supplier-price-input" value="${escapeHtml(itemData?.supplier_price || '')}" placeholder="Supplier U/P" step="0.01" min="0" onchange="calculateSupplierUP(this)"></td>
+        <td><input type="number" class="form-control form-control-sm profit-factor-input" value="${escapeHtml(itemData?.profit_factor || '')}" placeholder="Profit Factor" step="0.01" min="0" onchange="calculateSupplierUP(this)"></td>
+        <td><input type="number" class="form-control form-control-sm exchange-rate-input" value="${escapeHtml(itemData?.exchange_rate || '')}" placeholder="Exchange Rate" step="0.01" min="0" onchange="calculateSupplierUP(this)"></td>
+        <td><input type="number" class="form-control form-control-sm supplier-up-input" value="${escapeHtml(itemData?.supplier_up || '')}" placeholder="Calculated Price" step="0.01" readonly></td>
         <td>
             <button type="button" class="btn btn-sm btn-outline-danger delete-row-btn" onclick="deleteQuotationItemRow(this)">
                 <i class="fas fa-trash"></i>
@@ -1940,7 +1969,13 @@ function resetPurchaseOrderForm() {
 async function loadPurchaseOrderForEdit(poId) {
     try {
         const response = await fetch(`/api/purchase-orders/${poId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const po = await response.json();
+        
+        console.log('Loaded purchase order data:', po);
+        console.log('Purchase order items:', po.items);
         
         document.getElementById('purchase-order-id').value = po.id;
         document.getElementById('po-number').value = po.po_number;
@@ -1955,9 +1990,13 @@ async function loadPurchaseOrderForEdit(poId) {
         document.getElementById('po-items-tbody').innerHTML = '';
         poItemCounter = 0;
         
-        if (po.items && po.items.length > 0) {
-            po.items.forEach(item => addPurchaseOrderItemRow(item));
+        if (po.items && Array.isArray(po.items) && po.items.length > 0) {
+            po.items.forEach(item => {
+                console.log('Adding purchase order item row:', item);
+                addPurchaseOrderItemRow(item);
+            });
         } else {
+            console.warn('No items found or items is not an array:', po.items);
             addPurchaseOrderItem();
         }
         
@@ -1981,17 +2020,17 @@ function addPurchaseOrderItemRow(itemData = null) {
     
     row.innerHTML = `
         <td class="serial-number">${poItemCounter}</td>
-        <td><input type="text" class="form-control" name="manufacturer_number" value="${itemData?.manufacturer_number || ''}" placeholder="Manufacturer #"></td>
-        <td><input type="text" class="form-control" name="stockist_number" value="${itemData?.stockist_number || ''}" placeholder="Stockist #"></td>
-        <td><input type="text" class="form-control" name="coo" value="${itemData?.coo || ''}" placeholder="COO"></td>
-        <td><input type="text" class="form-control" name="brand" value="${itemData?.brand || ''}" placeholder="Brand"></td>
-        <td><input type="text" class="form-control" name="description" value="${itemData?.description || ''}" placeholder="Description"></td>
-        <td><input type="text" class="form-control" name="au" value="${itemData?.au || ''}" placeholder="A/U"></td>
-        <td><input type="number" class="form-control" name="quantity" value="${itemData?.quantity || ''}" placeholder="Qty" onchange="calculatePORowTotal(this)"></td>
-        <td><input type="number" class="form-control" name="unit_price" value="${itemData?.unit_price || ''}" placeholder="U/P" step="0.01" onchange="calculatePORowTotal(this)"></td>
-        <td><input type="number" class="form-control" name="total_price" value="${itemData?.total_price || ''}" placeholder="T/P" step="0.01" readonly></td>
-        <td><input type="text" class="form-control" name="delivery_time" value="${itemData?.delivery_time || ''}" placeholder="Delivery Time"></td>
-        <td><input type="text" class="form-control" name="remarks" value="${itemData?.remarks || ''}" placeholder="Remarks"></td>
+        <td><input type="text" class="form-control" name="manufacturer_number" value="${escapeHtml(itemData?.manufacturer_number || '')}" placeholder="Manufacturer #"></td>
+        <td><input type="text" class="form-control" name="stockist_number" value="${escapeHtml(itemData?.stockist_number || '')}" placeholder="Stockist #"></td>
+        <td><input type="text" class="form-control" name="coo" value="${escapeHtml(itemData?.coo || '')}" placeholder="COO"></td>
+        <td><input type="text" class="form-control" name="brand" value="${escapeHtml(itemData?.brand || '')}" placeholder="Brand"></td>
+        <td><input type="text" class="form-control" name="description" value="${escapeHtml(itemData?.description || '')}" placeholder="Description"></td>
+        <td><input type="text" class="form-control" name="au" value="${escapeHtml(itemData?.au || '')}" placeholder="A/U"></td>
+        <td><input type="number" class="form-control" name="quantity" value="${escapeHtml(itemData?.quantity || '')}" placeholder="Qty" onchange="calculatePORowTotal(this)"></td>
+        <td><input type="number" class="form-control" name="unit_price" value="${escapeHtml(itemData?.unit_price || '')}" placeholder="U/P" step="0.01" onchange="calculatePORowTotal(this)"></td>
+        <td><input type="number" class="form-control" name="total_price" value="${escapeHtml(itemData?.total_price || '')}" placeholder="T/P" step="0.01" readonly></td>
+        <td><input type="text" class="form-control" name="delivery_time" value="${escapeHtml(itemData?.delivery_time || '')}" placeholder="Delivery Time"></td>
+        <td><input type="text" class="form-control" name="remarks" value="${escapeHtml(itemData?.remarks || '')}" placeholder="Remarks"></td>
         <td>
             <button type="button" class="btn btn-sm btn-outline-danger" onclick="deletePurchaseOrderItemRow(this)">
                 <i class="fas fa-trash"></i>
@@ -3708,6 +3747,9 @@ async function loadSystemInfo() {
             // Update system information display
             document.getElementById('systemVersion').textContent = systemInfo.version;
             document.getElementById('databaseType').textContent = systemInfo.database.type;
+            if (systemInfo.database.path) {
+                document.getElementById('databasePath').textContent = systemInfo.database.path;
+            }
             document.getElementById('databaseSize').textContent = systemInfo.database.size;
             document.getElementById('serverStatus').textContent = systemInfo.server.status;
             document.getElementById('serverUptime').textContent = systemInfo.server.uptime;

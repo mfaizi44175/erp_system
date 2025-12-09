@@ -84,13 +84,11 @@ if (SQLiteStore) {
 // Session configuration
 let sessionStore;
 if (SQLiteStore) {
-  // Use a proper sqlite3.Database connection for connect-sqlite3
-  const SESSION_DB_PATH = path.join(SESSION_DIR, process.env.SESSION_DB || 'sessions.sqlite');
-  const sessionDbConn = new sqlite3.Database(SESSION_DB_PATH);
+  // Initialize connect-sqlite3 using file-based options per upstream API
   sessionStore = new SQLiteStore({
-    db: sessionDbConn,
-    table: 'sessions',
-    concurrentDB: true // enable WAL mode for better concurrency
+    dir: SESSION_DIR,
+    db: process.env.SESSION_DB || 'sessions.sqlite',
+    table: 'sessions'
   });
 }
 
@@ -112,6 +110,8 @@ app.use(session({
 
 // Middleware
 app.use(express.json());
+// Serve static front-end files
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Resolve and ensure upload directories before registering static route
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, 'uploads'));
@@ -2012,18 +2012,48 @@ app.get('/api/admin/system-info', requireAdmin, (req, res) => {
       // If file does not exist yet, keep defaults
     }
     
-    // Get system info
-    db.get('SELECT COUNT(*) as totalUsers FROM users', (err, userCount) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
+    // Compute active sessions from persistent session store if available
+    const SESSION_DB_PATH = path.join(
+      path.resolve(process.env.SESSION_DIR || path.join(__dirname, 'sessions')),
+      process.env.SESSION_DB || 'sessions.sqlite'
+    );
+    const nowMs = Date.now();
+    const computeActiveSessions = (cb) => {
+      try {
+        if (!fs.existsSync(SESSION_DB_PATH)) {
+          return cb(0);
+        }
+        const sdb = new sqlite3.Database(SESSION_DB_PATH);
+        sdb.all('PRAGMA table_info(sessions)', (pragmaErr, cols) => {
+          if (pragmaErr) {
+            sdb.close();
+            return cb(0);
+          }
+          const colNames = (cols || []).map(c => c.name.toLowerCase());
+          const expiryCol = ['expires', 'expiry', 'expiration', 'expire'].find(name => colNames.includes(name));
+          if (!expiryCol) {
+            sdb.close();
+            return cb(0);
+          }
+          sdb.get(`SELECT COUNT(*) AS cnt FROM sessions WHERE ${expiryCol} > ?`, [nowMs], (cntErr, row) => {
+            const cnt = (!cntErr && row && typeof row.cnt === 'number') ? row.cnt : 0;
+            sdb.close();
+            cb(cnt);
+          });
+        });
+      } catch (e) {
+        cb(0);
       }
-      
-      db.get('SELECT COUNT(*) as totalQueries FROM queries WHERE deleted_at IS NULL', (err, queryCount) => {
+    };
+
+    computeActiveSessions((activeCount) => {
+      // Get system info
+      db.get('SELECT COUNT(*) as totalUsers FROM users', (err, userCount) => {
         if (err) {
           return res.status(500).json({ error: err.message });
         }
         
-        db.get('SELECT COUNT(*) as totalSessions FROM sessions', (err, sessionCount) => {
+        db.get('SELECT COUNT(*) as totalQueries FROM queries WHERE deleted_at IS NULL', (err, queryCount) => {
           if (err) {
             return res.status(500).json({ error: err.message });
           }
@@ -2039,7 +2069,7 @@ app.get('/api/admin/system-info', requireAdmin, (req, res) => {
             statistics: {
               totalUsers: userCount.totalUsers,
               totalQueries: queryCount.totalQueries,
-              activeSessions: sessionCount.totalSessions
+              activeSessions: activeCount
             },
             server: {
               status: 'Running',

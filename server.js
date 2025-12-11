@@ -257,18 +257,16 @@ db.serialize(() => {
     }
   });
 
-  // Add COO and Brand columns to existing purchase_order_items table if they don't exist
-  db.run(`ALTER TABLE purchase_order_items ADD COLUMN coo TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column name')) {
-      console.error('Error adding coo column to purchase_order_items:', err);
-    }
-  });
-  
-  db.run(`ALTER TABLE purchase_order_items ADD COLUMN brand TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column name')) {
-      console.error('Error adding brand column to purchase_order_items:', err);
-    }
-  });
+  // Ensure supplier_responses table exists for querying supplier responses
+  db.run(`CREATE TABLE IF NOT EXISTS supplier_responses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query_id INTEGER,
+    supplier_name TEXT,
+    response_status TEXT,
+    attachment_path TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (query_id) REFERENCES queries (id)
+  )`);
 
   // Quotations table
   db.run(`CREATE TABLE IF NOT EXISTS quotations (
@@ -465,6 +463,19 @@ db.serialize(() => {
     remarks TEXT,
     FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders (id)
   )`);
+
+  // Add COO and Brand columns to existing purchase_order_items table if they don't exist (run after table creation)
+  db.run(`ALTER TABLE purchase_order_items ADD COLUMN coo TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding coo column to purchase_order_items:', err);
+    }
+  });
+  
+  db.run(`ALTER TABLE purchase_order_items ADD COLUMN brand TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding brand column to purchase_order_items:', err);
+    }
+  });
 
   // Activity logs table for tracking user actions
   db.run(`CREATE TABLE IF NOT EXISTS activity_logs (

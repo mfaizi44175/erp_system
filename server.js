@@ -496,6 +496,34 @@ db.serialize(() => {
   )`);
 });
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS supplier_responses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query_id INTEGER,
+    supplier_name TEXT,
+    response_status TEXT,
+    attachment_path TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (query_id) REFERENCES queries (id)
+  );
+  CREATE TABLE IF NOT EXISTS purchase_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_order_id INTEGER,
+    serial_number INTEGER,
+    manufacturer_number TEXT,
+    stockist_number TEXT,
+    coo TEXT,
+    brand TEXT,
+    description TEXT,
+    au TEXT,
+    quantity INTEGER,
+    unit_price REAL,
+    total_price REAL,
+    delivery_time TEXT,
+    remarks TEXT,
+    FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders (id)
+  );
+`);
 // Function to log user activities
 function logActivity(userId, username, action, entityType, entityId = null, entityName = null, filePath = null, fileName = null, details = null, req = null) {
   const ipAddress = req ? (req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.socket.remoteAddress) : null;
@@ -512,6 +540,31 @@ function logActivity(userId, username, action, entityType, entityId = null, enti
 }
 
 // Routes
+app.get('/healthz', (req, res) => {
+  db.all("SELECT name FROM sqlite_master WHERE type='table'", [], (err, rows) => {
+    if (err) {
+      return res.status(503).json({ status: 'error', error: err.message });
+    }
+    const names = (rows || []).map(r => r.name);
+    const required = [
+      'users',
+      'queries',
+      'query_items',
+      'supplier_responses',
+      'quotations',
+      'quotation_items',
+      'purchase_orders',
+      'purchase_order_items',
+      'activity_logs'
+    ];
+    const missing = required.filter(t => !names.includes(t));
+    res.json({
+      status: missing.length === 0 ? 'ok' : 'degraded',
+      missing_tables: missing,
+      db_path: path.resolve(DB_PATH)
+    });
+  });
+});
 
 // CSRF helpers
 function ensureCsrf(req) {

@@ -1295,15 +1295,21 @@ async function loadQuotationForEdit(quotationId) {
         
         console.log('Loaded quotation data:', quotation);
         console.log('Quotation items:', quotation.items);
-        
-        // Populate form fields
-        document.getElementById('quotation-id').value = quotation.id;
-        document.getElementById('quotation-number').value = quotation.quotation_number || '';
-        document.getElementById('quotation-date').value = quotation.date || '';
-        document.getElementById('to-client').value = quotation.to_client || '';
-        document.getElementById('linked-query').value = quotation.query_id || '';
-        document.getElementById('currency').value = quotation.currency || 'USD';
-        document.getElementById('quotation-type').value = quotation.quotation_type || 'local';
+
+        const quotationIdInput = document.getElementById('quotation-id');
+        if (quotationIdInput) quotationIdInput.value = quotation.id;
+        const quotationNumberInput = document.getElementById('quotation-number');
+        if (quotationNumberInput) quotationNumberInput.value = quotation.quotation_number || '';
+        const quotationDateInput = document.getElementById('quotation-date');
+        if (quotationDateInput) quotationDateInput.value = quotation.date || '';
+        const toClientInput = document.getElementById('to-client');
+        if (toClientInput) toClientInput.value = quotation.to_client || '';
+        const linkedQuerySelect = document.getElementById('linked-query');
+        if (linkedQuerySelect) linkedQuerySelect.value = quotation.query_id || '';
+        const currencySelect = document.getElementById('currency');
+        if (currencySelect) currencySelect.value = quotation.currency || 'USD';
+        const quotationTypeSelect = document.getElementById('quotation-type');
+        if (quotationTypeSelect) quotationTypeSelect.value = quotation.quotation_type || 'local';
         
         // Initialize GST/Freight display based on quotation type
         toggleGSTFreight();
@@ -1970,14 +1976,21 @@ async function loadPurchaseOrderForEdit(poId) {
         
         console.log('Loaded purchase order data:', po);
         console.log('Purchase order items:', po.items);
-        
-        document.getElementById('purchase-order-id').value = po.id;
-        document.getElementById('po-number').value = po.po_number;
-        document.getElementById('po-date').value = po.date;
-        document.getElementById('supplier-name').value = po.supplier_name;
-        document.getElementById('supplier-address').value = po.supplier_address;
-        document.getElementById('po-currency').value = po.po_currency || 'INR';
-        document.getElementById('freight-charges').value = po.freight_charges || 0;
+
+        const poIdInput = document.getElementById('purchase-order-id');
+        if (poIdInput) poIdInput.value = po.id;
+        const poNumberInput = document.getElementById('po-number');
+        if (poNumberInput) poNumberInput.value = po.po_number;
+        const poDateInput = document.getElementById('po-date');
+        if (poDateInput) poDateInput.value = po.date;
+        const supplierNameInput = document.getElementById('supplier-name');
+        if (supplierNameInput) supplierNameInput.value = po.supplier_name;
+        const supplierAddressInput = document.getElementById('supplier-address');
+        if (supplierAddressInput) supplierAddressInput.value = po.supplier_address;
+        const poCurrencySelect = document.getElementById('po-currency');
+        if (poCurrencySelect) poCurrencySelect.value = po.po_currency || 'INR';
+        const freightChargesInput = document.getElementById('freight-charges');
+        if (freightChargesInput) freightChargesInput.value = po.freight_charges || 0;
         updatePOCurrencyDisplay();
         
         // Load items
@@ -2021,7 +2034,7 @@ function addPurchaseOrderItemRow(itemData = null) {
         <td><input type="text" class="form-control" name="description" value="${escapeHtml(itemData?.description || '')}" placeholder="Description"></td>
         <td><input type="text" class="form-control" name="au" value="${escapeHtml(itemData?.au || '')}" placeholder="A/U"></td>
         <td><input type="number" class="form-control" name="quantity" value="${escapeHtml(itemData?.quantity || '')}" placeholder="Qty" onchange="calculatePORowTotal(this)"></td>
-        <td><input type="number" class="form-control" name="unit_price" value="${escapeHtml(itemData?.unit_price || '')}" placeholder="U/P" step="0.01" onchange="calculatePORowTotal(this)"></td>
+        <td><input type="number" class="form-control po-unit-price-input" name="unit_price" value="${escapeHtml(itemData?.unit_price || '')}" placeholder="U/P" step="0.01" onchange="calculatePORowTotal(this)"></td>
         <td><input type="number" class="form-control" name="total_price" value="${escapeHtml(itemData?.total_price || '')}" placeholder="T/P" step="0.01" readonly></td>
         <td><input type="text" class="form-control" name="delivery_time" value="${escapeHtml(itemData?.delivery_time || '')}" placeholder="Delivery Time"></td>
         <td><input type="text" class="form-control" name="remarks" value="${escapeHtml(itemData?.remarks || '')}" placeholder="Remarks"></td>

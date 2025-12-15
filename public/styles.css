@@ -215,6 +215,13 @@ body {
     margin: 0 auto;
 }
 
+.unit-price-input,
+.total-price-input,
+.supplier-price-input,
+.po-unit-price-input {
+    min-width: 110px;
+}
+
 /* Module Content Animation */
 .module-content {
     animation: slideInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);

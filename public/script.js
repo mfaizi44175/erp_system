@@ -625,12 +625,6 @@ async function handleQuerySubmit(event) {
     
     const formData = new FormData(event.target);
     
-    // For new queries, automatically set status to 'pending'
-    // Status can only be changed via the dedicated status change button
-    if (!currentQueryId) {
-        formData.append('status', 'pending');
-    }
-    
     // Collect items data
     const items = [];
     const rows = document.querySelectorAll('#items-tbody tr');

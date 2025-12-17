@@ -1427,10 +1427,10 @@ function calculateRowTotal(input) {
 function toggleGSTFreight() {
     const quotationTypeElement = document.getElementById('quotation-type');
     const gstFreightRow = document.getElementById('gst-freight-row');
-    const totalLabel = document.getElementById('total-label');
-    const gstFreightLabel = document.getElementById('gst-freight-label');
+    const totalLabel = document.getElementById('total-label') || document.getElementById('total-without-gst-label');
+    const gstFreightLabel = document.getElementById('gst-freight-label') || document.getElementById('gst-amount-label');
 
-    if (!quotationTypeElement || !gstFreightRow || !totalLabel || !gstFreightLabel) {
+    if (!quotationTypeElement || !gstFreightRow) {
         calculateTotals();
         return;
     }
@@ -1444,8 +1444,8 @@ function toggleGSTFreight() {
                 <input type="number" id="freight-amount-input" class="form-control" 
                        step="0.01" min="0" value="0" onchange="calculateTotals()" style="width: 120px;">
             </td>`;
-        totalLabel.textContent = 'Total without Freight:';
-        gstFreightLabel.textContent = 'Freight Amount:';
+        if (totalLabel) totalLabel.textContent = 'Total without Freight:';
+        if (gstFreightLabel) gstFreightLabel.textContent = 'Freight Amount:';
     } else {
         gstFreightRow.innerHTML = `
             <td><strong>GST (18%):</strong></td>
@@ -1453,8 +1453,8 @@ function toggleGSTFreight() {
                 <span id="gst-amount">0.00</span>
                 <input type="hidden" id="gst-amount-input" name="gst_amount" value="0">
             </td>`;
-        totalLabel.textContent = 'Total without GST:';
-        gstFreightLabel.textContent = 'GST (18%):';
+        if (totalLabel) totalLabel.textContent = 'Total without GST:';
+        if (gstFreightLabel) gstFreightLabel.textContent = 'GST (18%):';
     }
     
     calculateTotals();

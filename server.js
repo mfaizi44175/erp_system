@@ -196,6 +196,10 @@ const upload = multer({
       db.run('PRAGMA journal_mode=WAL');
       db.run('PRAGMA synchronous=NORMAL');
       db.run('PRAGMA foreign_keys=ON');
+      db.run(`PRAGMA busy_timeout=${parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '5000', 10)}`);
+      try {
+        db.configure('busyTimeout', parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '5000', 10));
+      } catch {}
     } catch (e) {
       console.warn('Failed to set SQLite PRAGMAs:', e.message);
     }
@@ -271,6 +275,7 @@ db.serialize(() => {
   // Quotations table
   db.run(`CREATE TABLE IF NOT EXISTS quotations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tender_case_no TEXT,
     quotation_number TEXT,
     date TEXT,
     to_client TEXT,
@@ -298,6 +303,12 @@ db.serialize(() => {
   db.run(`ALTER TABLE quotations ADD COLUMN attachment TEXT`, (err) => {
     if (err && !err.message.includes('duplicate column name')) {
       console.error('Error adding attachment column:', err);
+    }
+  });
+
+  db.run(`ALTER TABLE quotations ADD COLUMN tender_case_no TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding tender_case_no column:', err);
     }
   });
 
@@ -378,6 +389,7 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     po_number TEXT,
     date TEXT,
+    subject TEXT,
     supplier_name TEXT,
     supplier_address TEXT,
     po_currency TEXT DEFAULT 'INR',
@@ -392,6 +404,105 @@ db.serialize(() => {
   db.run(`ALTER TABLE purchase_orders ADD COLUMN po_currency TEXT DEFAULT 'INR'`, (err) => {
     if (err && !err.message.includes('duplicate column name')) {
       console.error('Error adding po_currency column:', err);
+    }
+  });
+
+  db.run(`ALTER TABLE purchase_orders ADD COLUMN subject TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding subject column:', err);
+    }
+  });
+
+  db.run(`ALTER TABLE purchase_orders ADD COLUMN source_query_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding source_query_id column:', err);
+    }
+  });
+
+  db.run(`ALTER TABLE purchase_orders ADD COLUMN source_quotation_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding source_quotation_id column:', err);
+    }
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ref_no TEXT,
+    ar_no TEXT,
+    date TEXT,
+    invoice_number TEXT,
+    to_client TEXT,
+    ntn TEXT,
+    gst TEXT,
+    total_without_gst REAL,
+    gst_amount REAL,
+    grand_total REAL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.run(`ALTER TABLE invoices ADD COLUMN source_query_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding source_query_id column to invoices:', err);
+    }
+  });
+
+  db.run(`ALTER TABLE invoices ADD COLUMN source_quotation_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding source_quotation_id column to invoices:', err);
+    }
+  });
+
+  db.run(`ALTER TABLE invoices ADD COLUMN source_purchase_order_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding source_purchase_order_id column to invoices:', err);
+    }
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS invoice_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER,
+    serial_number INTEGER,
+    manufacturer_number TEXT,
+    stockist_number TEXT,
+    coo TEXT,
+    brand TEXT,
+    description TEXT,
+    au TEXT,
+    quantity REAL,
+    unit_price REAL,
+    total_price REAL,
+    supplier_price REAL,
+    supplier_up REAL,
+    profit_factor REAL,
+    exchange_rate REAL,
+    calculated_price REAL,
+    FOREIGN KEY (invoice_id) REFERENCES invoices (id)
+  )`);
+
+  db.run(`ALTER TABLE invoice_items ADD COLUMN manufacturer_number TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding manufacturer_number column to invoice_items:', err);
+    }
+  });
+  db.run(`ALTER TABLE invoice_items ADD COLUMN stockist_number TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding stockist_number column to invoice_items:', err);
+    }
+  });
+  db.run(`ALTER TABLE invoice_items ADD COLUMN coo TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding coo column to invoice_items:', err);
+    }
+  });
+  db.run(`ALTER TABLE invoice_items ADD COLUMN brand TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding brand column to invoice_items:', err);
+    }
+  });
+  db.run(`ALTER TABLE invoice_items ADD COLUMN supplier_price REAL`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding supplier_price column to invoice_items:', err);
     }
   });
 
@@ -555,6 +666,8 @@ app.get('/healthz', (req, res) => {
       'quotation_items',
       'purchase_orders',
       'purchase_order_items',
+      'invoices',
+      'invoice_items',
       'activity_logs'
     ];
     const missing = required.filter(t => !names.includes(t));
@@ -1088,6 +1201,7 @@ app.get('/api/quotations/:id', requireAuth, checkPermission('quotations'), (req,
 // Create new quotation
 app.post('/api/quotations', requireAuth, checkPermission('quotations'), requireCsrf, writeLimiter, (req, res) => {
   const {
+    tender_case_no,
     quotation_number,
     date,
     to_client,
@@ -1105,13 +1219,13 @@ app.post('/api/quotations', requireAuth, checkPermission('quotations'), requireC
   } = req.body;
 
   const query = `INSERT INTO quotations (
-    quotation_number, date, to_client, query_id, currency, quotation_type, attachment,
+    tender_case_no, quotation_number, date, to_client, query_id, currency, quotation_type, attachment,
     supplier_price, profit_factor, exchange_rate,
     total_without_gst, gst_amount, grand_total
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
   db.run(query, [
-    quotation_number, date, to_client, query_id, currency, quotation_type || 'local', attachment,
+    tender_case_no, quotation_number, date, to_client, query_id, currency, quotation_type || 'local', attachment,
     supplier_price, profit_factor, exchange_rate,
     total_without_gst, gst_amount, grand_total
   ], function(err) {
@@ -1150,6 +1264,7 @@ app.post('/api/quotations', requireAuth, checkPermission('quotations'), requireC
 app.put('/api/quotations/:id', requireAuth, checkPermission('quotations'), requireCsrf, writeLimiter, (req, res) => {
   const quotationId = req.params.id;
   const {
+    tender_case_no,
     quotation_number,
     date,
     to_client,
@@ -1167,13 +1282,13 @@ app.put('/api/quotations/:id', requireAuth, checkPermission('quotations'), requi
   } = req.body;
 
   const query = `UPDATE quotations SET 
-    quotation_number = ?, date = ?, to_client = ?, query_id = ?, currency = ?, quotation_type = ?, attachment = ?,
+    tender_case_no = ?, quotation_number = ?, date = ?, to_client = ?, query_id = ?, currency = ?, quotation_type = ?, attachment = ?,
     supplier_price = ?, profit_factor = ?, exchange_rate = ?,
     total_without_gst = ?, gst_amount = ?, grand_total = ?
     WHERE id = ?`;
 
   db.run(query, [
-    quotation_number, date, to_client, query_id, currency, quotation_type || 'local', attachment,
+    tender_case_no, quotation_number, date, to_client, query_id, currency, quotation_type || 'local', attachment,
     supplier_price, profit_factor, exchange_rate,
     total_without_gst, gst_amount, grand_total, quotationId
   ], function(err) {
@@ -1218,16 +1333,388 @@ app.put('/api/quotations/:id', requireAuth, checkPermission('quotations'), requi
 // Delete quotation
 app.delete('/api/quotations/:id', requireAuth, checkPermission('quotations'), requireCsrf, writeLimiter, (req, res) => {
   const quotationId = req.params.id;
-  
-  db.run('DELETE FROM quotations WHERE id = ?', [quotationId], function(err) {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
+
+  const rollback = (rollbackErr, status, payload) => {
+    db.run('ROLLBACK', () => {
+      if (rollbackErr) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+      return res.status(status).json(payload);
+    });
+  };
+
+  const busyMessage = 'Database is busy. Please try again.';
+
+  const runAttempt = (attempt) => {
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION', (beginErr) => {
+        if (beginErr) {
+          if (beginErr && beginErr.code === 'SQLITE_BUSY' && attempt < 3) {
+            const delayMs = 150 * attempt;
+            return setTimeout(() => runAttempt(attempt + 1), delayMs);
+          }
+          if (beginErr && beginErr.code === 'SQLITE_BUSY') {
+            return res.status(503).json({ error: busyMessage });
+          }
+          return res.status(500).json({ error: 'Database error' });
+        }
+
+        db.get(
+          'SELECT 1 AS one FROM invoices WHERE source_quotation_id = ? LIMIT 1',
+          [quotationId],
+          (invErr, invRow) => {
+            if (invErr) {
+              return rollback(invErr, 500, { error: 'Failed to validate quotation links' });
+            }
+            if (invRow) {
+              return rollback(null, 409, { error: 'Quotation has invoices and cannot be deleted' });
+            }
+
+            db.get(
+              'SELECT 1 AS one FROM purchase_orders WHERE source_quotation_id = ? LIMIT 1',
+              [quotationId],
+              (poErr, poRow) => {
+                if (poErr) {
+                  return rollback(poErr, 500, { error: 'Failed to validate quotation links' });
+                }
+                if (poRow) {
+                  return rollback(null, 409, { error: 'Quotation has purchase orders and cannot be deleted' });
+                }
+
+                db.run('DELETE FROM quotation_items WHERE quotation_id = ?', [quotationId], (itemsErr) => {
+                  if (itemsErr) {
+                    if (itemsErr && itemsErr.code === 'SQLITE_BUSY') {
+                      return rollback(itemsErr, 503, { error: busyMessage });
+                    }
+                    return rollback(itemsErr, 500, { error: 'Failed to delete quotation items' });
+                  }
+
+                  db.run('DELETE FROM quotations WHERE id = ?', [quotationId], function(qErr) {
+                    if (qErr) {
+                      if (qErr && qErr.code === 'SQLITE_BUSY') {
+                        return rollback(qErr, 503, { error: busyMessage });
+                      }
+                      return rollback(qErr, 500, { error: 'Failed to delete quotation' });
+                    }
+
+                    if (!this.changes) {
+                      return rollback(null, 404, { error: 'Quotation not found' });
+                    }
+
+                    db.run('COMMIT', (commitErr) => {
+                      if (commitErr) {
+                        if (commitErr && commitErr.code === 'SQLITE_BUSY') {
+                          return rollback(commitErr, 503, { error: busyMessage });
+                        }
+                        return rollback(commitErr, 500, { error: 'Database error' });
+                      }
+
+                      logActivity(req.session.userId, req.session.username, 'delete', 'quotation', quotationId, `Quotation ${quotationId}`, null, null, 'Quotation deleted', req);
+                      return res.json({ message: 'Quotation deleted successfully' });
+                    });
+                  });
+                });
+              }
+            );
+          }
+        );
+      });
+    });
+  };
+
+  runAttempt(1);
+});
+
+app.post('/api/quotations/:id/approve-to-invoice', requireAdmin, requireCsrf, writeLimiter, (req, res) => {
+  const quotationId = req.params.id;
+
+  const rollback = (rollbackErr, status, payload) => {
+    db.run('ROLLBACK', () => {
+      if (rollbackErr) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+      return res.status(status).json(payload);
+    });
+  };
+
+  db.serialize(() => {
+    db.run('BEGIN IMMEDIATE TRANSACTION', (beginErr) => {
+      if (beginErr) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+
+      db.get('SELECT * FROM quotations WHERE id = ?', [quotationId], (qErr, quotation) => {
+        if (qErr) {
+          return rollback(qErr, 500, { error: 'Failed to load quotation' });
+        }
+        if (!quotation) {
+          return rollback(null, 404, { error: 'Quotation not found' });
+        }
+
+        db.all('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY serial_number', [quotationId], (itemsErr, items) => {
+          if (itemsErr) {
+            return rollback(itemsErr, 500, { error: 'Failed to load quotation items' });
+          }
+
+          const invoiceDate = quotation.date || new Date().toISOString().slice(0, 10);
+          const refNo = quotation.quotation_number || `QUOT-${quotationId}`;
+          const arNo = '';
+          const invoiceNumber = '';
+          const toClient = quotation.to_client || '';
+          const ntn = '4371458-7';
+          const gst = '2600437145815';
+
+          const insertInvoiceSql = `INSERT INTO invoices (
+            ref_no, ar_no, date, invoice_number, to_client, ntn, gst,
+            total_without_gst, gst_amount, grand_total,
+            source_query_id, source_quotation_id, source_purchase_order_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+          db.run(
+            insertInvoiceSql,
+            [
+              refNo,
+              arNo,
+              invoiceDate,
+              invoiceNumber,
+              toClient,
+              ntn,
+              gst,
+              quotation.total_without_gst || 0,
+              quotation.gst_amount || 0,
+              quotation.grand_total || 0,
+              quotation.query_id || null,
+              quotation.id,
+              null
+            ],
+            function(insertErr) {
+              if (insertErr) {
+                return rollback(insertErr, 500, { error: 'Failed to create invoice' });
+              }
+
+              const invoiceId = this.lastID;
+
+              if (Array.isArray(items) && items.length > 0) {
+                const itemSql = `INSERT INTO invoice_items (
+                  invoice_id, serial_number,
+                  manufacturer_number, stockist_number, coo, brand,
+                  description, au, quantity, unit_price, total_price,
+                  supplier_price, supplier_up, profit_factor, exchange_rate, calculated_price
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+                const stmt = db.prepare(itemSql);
+                for (const item of items) {
+                  const supplierUp = parseFloat(item.supplier_up || 0) || 0;
+                  const profitFactor = parseFloat(item.profit_factor || 0) || 0;
+                  const exchangeRate = parseFloat(item.exchange_rate || 0) || 0;
+                  const calculatedPrice = supplierUp * profitFactor * exchangeRate;
+                  stmt.run([
+                    invoiceId,
+                    item.serial_number,
+                    item.manufacturer_number || null,
+                    item.stockist_number || null,
+                    item.coo || null,
+                    item.brand || null,
+                    item.description || null,
+                    item.au || null,
+                    item.quantity || 0,
+                    item.unit_price || 0,
+                    item.total_price || 0,
+                    item.supplier_price || null,
+                    supplierUp,
+                    profitFactor,
+                    exchangeRate,
+                    calculatedPrice
+                  ]);
+                }
+                stmt.finalize((finalizeErr) => {
+                  if (finalizeErr) {
+                    return rollback(finalizeErr, 500, { error: 'Failed to create invoice items' });
+                  }
+
+                  db.run('COMMIT', (commitErr) => {
+                    if (commitErr) {
+                      return rollback(commitErr, 500, { error: 'Database error' });
+                    }
+                    logActivity(req.session.userId, req.session.username, 'create', 'invoice', invoiceId, `Invoice ${invoiceId}`, null, null, `Invoice created from quotation ${quotationId}`, req);
+                    return res.json({ invoiceId, message: 'Invoice created from quotation' });
+                  });
+                });
+                return;
+              }
+
+              db.run('COMMIT', (commitErr) => {
+                if (commitErr) {
+                  return rollback(commitErr, 500, { error: 'Database error' });
+                }
+                logActivity(req.session.userId, req.session.username, 'create', 'invoice', invoiceId, `Invoice ${invoiceId}`, null, null, `Invoice created from quotation ${quotationId}`, req);
+                return res.json({ invoiceId, message: 'Invoice created from quotation' });
+              });
+            }
+          );
+        });
+      });
+    });
+  });
+});
+
+app.get('/api/queries/:id/related', requireAuth, (req, res) => {
+  const queryId = req.params.id;
+
+  db.get('SELECT role, permissions FROM users WHERE id = ?', [req.session.userId], (uErr, user) => {
+    if (uErr || !user) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
-    // Log activity
-  logActivity(req.session.userId, req.session.username, 'delete', 'quotation', quotationId, `Quotation ${quotationId}`, null, null, 'Quotation deleted', req);
-    
-    res.json({ message: 'Quotation deleted successfully' });
+    let permissions = {};
+    try {
+      permissions = JSON.parse(user.permissions || '{}');
+    } catch {
+      permissions = {};
+    }
+    if (user.role === 'admin') {
+      permissions = { queries: true, quotations: true, purchase_orders: true, invoices: true, admin: true };
+    }
+    if (!permissions.queries) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    const result = { quotations: [], purchaseOrders: [], invoices: [] };
+
+    const tasks = [];
+
+    if (permissions.quotations) {
+      tasks.push((cb) => {
+        db.all(
+          'SELECT id, quotation_number, date, to_client, currency, grand_total FROM quotations WHERE query_id = ? ORDER BY created_at DESC',
+          [queryId],
+          (e, rows) => {
+            if (!e) result.quotations = rows || [];
+            cb(e);
+          }
+        );
+      });
+    }
+
+    if (permissions.purchase_orders) {
+      tasks.push((cb) => {
+        db.all(
+          'SELECT id, po_number, date, supplier_name, po_currency, grand_total, source_quotation_id FROM purchase_orders WHERE source_query_id = ? ORDER BY created_at DESC',
+          [queryId],
+          (e, rows) => {
+            if (!e) result.purchaseOrders = rows || [];
+            cb(e);
+          }
+        );
+      });
+    }
+
+    if (permissions.invoices) {
+      tasks.push((cb) => {
+        db.all(
+          'SELECT id, invoice_number, date, to_client, ref_no, grand_total, source_quotation_id, source_purchase_order_id FROM invoices WHERE source_query_id = ? ORDER BY created_at DESC',
+          [queryId],
+          (e, rows) => {
+            if (!e) result.invoices = rows || [];
+            cb(e);
+          }
+        );
+      });
+    }
+
+    let idx = 0;
+    const runNext = (err) => {
+      if (err) {
+        return res.status(500).json({ error: 'Failed to load related documents' });
+      }
+      if (idx >= tasks.length) {
+        return res.json(result);
+      }
+      const fn = tasks[idx++];
+      fn(runNext);
+    };
+    runNext(null);
+  });
+});
+
+app.get('/api/quotations/:id/related', requireAuth, (req, res) => {
+  const quotationId = req.params.id;
+
+  db.get('SELECT role, permissions FROM users WHERE id = ?', [req.session.userId], (uErr, user) => {
+    if (uErr || !user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    let permissions = {};
+    try {
+      permissions = JSON.parse(user.permissions || '{}');
+    } catch {
+      permissions = {};
+    }
+    if (user.role === 'admin') {
+      permissions = { queries: true, quotations: true, purchase_orders: true, invoices: true, admin: true };
+    }
+    if (!permissions.quotations) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    db.get('SELECT id, query_id FROM quotations WHERE id = ?', [quotationId], (qErr, qRow) => {
+      if (qErr) {
+        return res.status(500).json({ error: 'Failed to load quotation' });
+      }
+      if (!qRow) {
+        return res.status(404).json({ error: 'Quotation not found' });
+      }
+
+      const result = { query: null, purchaseOrders: [], invoices: [] };
+      const tasks = [];
+
+      if (permissions.queries && qRow.query_id) {
+        tasks.push((cb) => {
+          db.get('SELECT id, nsets_case_number, client_case_number, client_name, status FROM queries WHERE id = ?', [qRow.query_id], (e, row) => {
+            if (!e) result.query = row || null;
+            cb(e);
+          });
+        });
+      }
+
+      if (permissions.purchase_orders) {
+        tasks.push((cb) => {
+          db.all(
+            'SELECT id, po_number, date, supplier_name, po_currency, grand_total FROM purchase_orders WHERE source_quotation_id = ? ORDER BY created_at DESC',
+            [quotationId],
+            (e, rows) => {
+              if (!e) result.purchaseOrders = rows || [];
+              cb(e);
+            }
+          );
+        });
+      }
+
+      if (permissions.invoices) {
+        tasks.push((cb) => {
+          db.all(
+            'SELECT id, invoice_number, date, to_client, ref_no, grand_total, source_purchase_order_id FROM invoices WHERE source_quotation_id = ? ORDER BY created_at DESC',
+            [quotationId],
+            (e, rows) => {
+              if (!e) result.invoices = rows || [];
+              cb(e);
+            }
+          );
+        });
+      }
+
+      let idx = 0;
+      const runNext = (err) => {
+        if (err) {
+          return res.status(500).json({ error: 'Failed to load related documents' });
+        }
+        if (idx >= tasks.length) {
+          return res.json(result);
+        }
+        const fn = tasks[idx++];
+        fn(runNext);
+      };
+      runNext(null);
+    });
   });
 });
 
@@ -1258,7 +1745,8 @@ app.get('/api/quotations/:id/excel', requireAuth, checkPermission('quotations'),
 
     // Add headers
     worksheet.addRow(['QUOTATION']);
-    worksheet.addRow(['Quotation Number:', quotation.quotation_number]);
+    worksheet.addRow(['Tender No/Case No:', quotation.tender_case_no || '']);
+    worksheet.addRow(['Quotation No:', quotation.quotation_number]);
     worksheet.addRow(['Date:', quotation.date]);
     worksheet.addRow(['To:', quotation.to_client]);
     worksheet.addRow(['Currency:', quotation.currency]);
@@ -1382,12 +1870,12 @@ app.get('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_order
 
 // Create new purchase order
 app.post('/api/purchase-orders', requireAuth, checkPermission('purchase_orders'), requireCsrf, writeLimiter, (req, res) => {
-  const { po_number, date, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total, items } = req.body;
+  const { po_number, date, subject, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total, items } = req.body;
   
-  const sql = `INSERT INTO purchase_orders (po_number, date, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+  const sql = `INSERT INTO purchase_orders (po_number, date, subject, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   
-  db.run(sql, [po_number, date, supplier_name, supplier_address, po_currency || 'INR', total_price, freight_charges, grand_total], function(err) {
+  db.run(sql, [po_number, date, subject, supplier_name, supplier_address, po_currency || 'INR', total_price, freight_charges, grand_total], function(err) {
     if (err) {
       res.status(500).json({ error: err.message });
       return;
@@ -1434,14 +1922,14 @@ app.post('/api/purchase-orders', requireAuth, checkPermission('purchase_orders')
 // Update purchase order
 app.put('/api/purchase-orders/:id', requireAuth, checkPermission('purchase_orders'), requireCsrf, writeLimiter, (req, res) => {
   const { id } = req.params;
-  const { po_number, date, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total, items } = req.body;
+  const { po_number, date, subject, supplier_name, supplier_address, po_currency, total_price, freight_charges, grand_total, items } = req.body;
   
   const sql = `UPDATE purchase_orders SET 
-               po_number = ?, date = ?, supplier_name = ?, supplier_address = ?, po_currency = ?, 
+               po_number = ?, date = ?, subject = ?, supplier_name = ?, supplier_address = ?, po_currency = ?, 
                total_price = ?, freight_charges = ?, grand_total = ?, updated_at = CURRENT_TIMESTAMP 
                WHERE id = ?`;
   
-  db.run(sql, [po_number, date, supplier_name, supplier_address, po_currency || 'INR', total_price, freight_charges, grand_total, id], function(err) {
+  db.run(sql, [po_number, date, subject, supplier_name, supplier_address, po_currency || 'INR', total_price, freight_charges, grand_total, id], function(err) {
     if (err) {
       res.status(500).json({ error: err.message });
       return;
@@ -1550,6 +2038,7 @@ app.get('/api/purchase-orders/:id/excel', requireAuth, checkPermission('purchase
     worksheet.addRow(['PURCHASE ORDER']);
     worksheet.addRow(['PO Number:', purchaseOrder.po_number]);
     worksheet.addRow(['Date:', purchaseOrder.date]);
+    worksheet.addRow(['Subject:', purchaseOrder.subject || '']);
     worksheet.addRow(['Currency:', purchaseOrder.po_currency || 'INR']);
     worksheet.addRow(['Supplier Name:', purchaseOrder.supplier_name]);
     worksheet.addRow(['Supplier Address:', purchaseOrder.supplier_address]);
@@ -1627,6 +2116,469 @@ app.get('/api/purchase-orders/:id/excel', requireAuth, checkPermission('purchase
     res.download(filepath, filename);
   } catch (error) {
     console.error('Error generating purchase order Excel:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Invoice API endpoints
+
+// Get all invoices
+app.get('/api/invoices', requireAuth, checkPermission('invoices'), (req, res) => {
+  const sql = `SELECT * FROM invoices ORDER BY date DESC, created_at DESC`;
+
+  db.all(sql, [], (err, rows) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    res.json(rows);
+  });
+});
+
+// Get invoice by ID
+app.get('/api/invoices/:id', requireAuth, checkPermission('invoices'), (req, res) => {
+  const { id } = req.params;
+
+  db.get('SELECT * FROM invoices WHERE id = ?', [id], (err, invoice) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+
+    if (!invoice) {
+      res.status(404).json({ error: 'Invoice not found' });
+      return;
+    }
+
+    db.all('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY serial_number', [id], (err, items) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      invoice.items = items;
+      res.json(invoice);
+    });
+  });
+});
+
+// Create invoice
+app.post('/api/invoices', requireAuth, checkPermission('invoices'), requireCsrf, writeLimiter, (req, res) => {
+  const {
+    ref_no,
+    ar_no,
+    date,
+    invoice_number,
+    to_client,
+    total_without_gst,
+    gst_amount,
+    grand_total,
+    source_query_id,
+    source_quotation_id,
+    source_purchase_order_id,
+    items
+  } = req.body;
+
+  const ntn = '4371458-7';
+  const gst = '2600437145815';
+
+  const sql = `INSERT INTO invoices (
+    ref_no, ar_no, date, invoice_number, to_client, ntn, gst,
+    total_without_gst, gst_amount, grand_total,
+    source_query_id, source_quotation_id, source_purchase_order_id
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+  db.run(
+    sql,
+    [
+      ref_no,
+      ar_no,
+      date,
+      invoice_number,
+      to_client,
+      ntn,
+      gst,
+      total_without_gst,
+      gst_amount,
+      grand_total,
+      typeof source_query_id === 'undefined' ? null : source_query_id,
+      typeof source_quotation_id === 'undefined' ? null : source_quotation_id,
+      typeof source_purchase_order_id === 'undefined' ? null : source_purchase_order_id
+    ],
+    function(err) {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+
+    const invoiceId = this.lastID;
+
+    if (items && Array.isArray(items) && items.length > 0) {
+      const itemSql = `INSERT INTO invoice_items (
+        invoice_id, serial_number,
+        manufacturer_number, stockist_number, coo, brand,
+        description, au, quantity, unit_price, total_price,
+        supplier_price, supplier_up, profit_factor, exchange_rate, calculated_price
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+      const stmt = db.prepare(itemSql);
+      items.forEach((item, index) => {
+        const supplierPrice = typeof item.supplier_price === 'undefined' ? null : item.supplier_price;
+        const supplierUp = parseFloat(item.supplier_up || 0) || 0;
+        const profitFactor = parseFloat(item.profit_factor || 0) || 0;
+        const exchangeRate = parseFloat(item.exchange_rate || 0) || 0;
+        const calculatedPrice = supplierUp * profitFactor * exchangeRate;
+
+        stmt.run([
+          invoiceId,
+          index + 1,
+          item.manufacturer_number || null,
+          item.stockist_number || null,
+          item.coo || null,
+          item.brand || null,
+          item.description,
+          item.au,
+          item.quantity,
+          item.unit_price,
+          item.total_price,
+          supplierPrice,
+          supplierUp,
+          profitFactor,
+          exchangeRate,
+          calculatedPrice
+        ]);
+      });
+      stmt.finalize();
+    }
+
+    logActivity(req.session.userId, req.session.username, 'create', 'invoice', invoiceId, `Invoice ${invoiceId}`, null, null, 'Invoice created', req);
+    res.json({ id: invoiceId, message: 'Invoice created successfully' });
+    }
+  );
+});
+
+// Update invoice
+app.put('/api/invoices/:id', requireAuth, checkPermission('invoices'), requireCsrf, writeLimiter, (req, res) => {
+  const { id } = req.params;
+  const {
+    ref_no,
+    ar_no,
+    date,
+    invoice_number,
+    to_client,
+    total_without_gst,
+    gst_amount,
+    grand_total,
+    items
+  } = req.body;
+
+  const ntn = '4371458-7';
+  const gst = '2600437145815';
+
+  const sql = `UPDATE invoices SET
+               ref_no = ?, ar_no = ?, date = ?, invoice_number = ?, to_client = ?, ntn = ?, gst = ?,
+               total_without_gst = ?, gst_amount = ?, grand_total = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?`;
+
+  db.run(sql, [ref_no, ar_no, date, invoice_number, to_client, ntn, gst, total_without_gst, gst_amount, grand_total, id], function(err) {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+
+    db.run('DELETE FROM invoice_items WHERE invoice_id = ?', [id], (err) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+
+      if (items && Array.isArray(items) && items.length > 0) {
+        const itemSql = `INSERT INTO invoice_items (
+          invoice_id, serial_number,
+          manufacturer_number, stockist_number, coo, brand,
+          description, au, quantity, unit_price, total_price,
+          supplier_price, supplier_up, profit_factor, exchange_rate, calculated_price
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+        const stmt = db.prepare(itemSql);
+        items.forEach((item, index) => {
+          const supplierPrice = typeof item.supplier_price === 'undefined' ? null : item.supplier_price;
+          const supplierUp = parseFloat(item.supplier_up || 0) || 0;
+          const profitFactor = parseFloat(item.profit_factor || 0) || 0;
+          const exchangeRate = parseFloat(item.exchange_rate || 0) || 0;
+          const calculatedPrice = supplierUp * profitFactor * exchangeRate;
+
+          stmt.run([
+            id,
+            index + 1,
+            item.manufacturer_number || null,
+            item.stockist_number || null,
+            item.coo || null,
+            item.brand || null,
+            item.description,
+            item.au,
+            item.quantity,
+            item.unit_price,
+            item.total_price,
+            supplierPrice,
+            supplierUp,
+            profitFactor,
+            exchangeRate,
+            calculatedPrice
+          ]);
+        });
+        stmt.finalize();
+      }
+
+      logActivity(req.session.userId, req.session.username, 'update', 'invoice', id, `Invoice ${id}`, null, null, 'Invoice updated', req);
+      res.json({ message: 'Invoice updated successfully' });
+    });
+  });
+});
+
+app.get('/api/purchase-orders/:id/related', requireAuth, (req, res) => {
+  const poId = req.params.id;
+
+  db.get('SELECT role, permissions FROM users WHERE id = ?', [req.session.userId], (uErr, user) => {
+    if (uErr || !user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    let permissions = {};
+    try {
+      permissions = JSON.parse(user.permissions || '{}');
+    } catch {
+      permissions = {};
+    }
+    if (user.role === 'admin') {
+      permissions = { queries: true, quotations: true, purchase_orders: true, invoices: true, admin: true };
+    }
+    if (!permissions.purchase_orders) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    db.get('SELECT id, source_query_id, source_quotation_id FROM purchase_orders WHERE id = ?', [poId], (poErr, poRow) => {
+      if (poErr) {
+        return res.status(500).json({ error: 'Failed to load purchase order' });
+      }
+      if (!poRow) {
+        return res.status(404).json({ error: 'Purchase order not found' });
+      }
+
+      const result = { query: null, quotation: null, invoices: [] };
+      const tasks = [];
+
+      if (permissions.queries && poRow.source_query_id) {
+        tasks.push((cb) => {
+          db.get('SELECT id, nsets_case_number, client_case_number, client_name, status FROM queries WHERE id = ?', [poRow.source_query_id], (e, row) => {
+            if (!e) result.query = row || null;
+            cb(e);
+          });
+        });
+      }
+
+      if (permissions.quotations && poRow.source_quotation_id) {
+        tasks.push((cb) => {
+          db.get('SELECT id, quotation_number, date, to_client, currency, grand_total FROM quotations WHERE id = ?', [poRow.source_quotation_id], (e, row) => {
+            if (!e) result.quotation = row || null;
+            cb(e);
+          });
+        });
+      }
+
+      if (permissions.invoices) {
+        tasks.push((cb) => {
+          db.all(
+            'SELECT id, invoice_number, date, to_client, ref_no, grand_total FROM invoices WHERE source_purchase_order_id = ? ORDER BY created_at DESC',
+            [poId],
+            (e, rows) => {
+              if (!e) result.invoices = rows || [];
+              cb(e);
+            }
+          );
+        });
+      }
+
+      let idx = 0;
+      const runNext = (err) => {
+        if (err) {
+          return res.status(500).json({ error: 'Failed to load related documents' });
+        }
+        if (idx >= tasks.length) {
+          return res.json(result);
+        }
+        const fn = tasks[idx++];
+        fn(runNext);
+      };
+      runNext(null);
+    });
+  });
+});
+
+app.get('/api/invoices/:id/related', requireAuth, (req, res) => {
+  const invoiceId = req.params.id;
+
+  db.get('SELECT role, permissions FROM users WHERE id = ?', [req.session.userId], (uErr, user) => {
+    if (uErr || !user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    let permissions = {};
+    try {
+      permissions = JSON.parse(user.permissions || '{}');
+    } catch {
+      permissions = {};
+    }
+    if (user.role === 'admin') {
+      permissions = { queries: true, quotations: true, purchase_orders: true, invoices: true, admin: true };
+    }
+    if (!permissions.invoices) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    db.get('SELECT id, source_query_id, source_quotation_id, source_purchase_order_id FROM invoices WHERE id = ?', [invoiceId], (iErr, inv) => {
+      if (iErr) {
+        return res.status(500).json({ error: 'Failed to load invoice' });
+      }
+      if (!inv) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      const result = { query: null, quotation: null, purchaseOrder: null };
+      const tasks = [];
+
+      if (permissions.queries && inv.source_query_id) {
+        tasks.push((cb) => {
+          db.get('SELECT id, nsets_case_number, client_case_number, client_name, status FROM queries WHERE id = ?', [inv.source_query_id], (e, row) => {
+            if (!e) result.query = row || null;
+            cb(e);
+          });
+        });
+      }
+
+      if (permissions.quotations && inv.source_quotation_id) {
+        tasks.push((cb) => {
+          db.get('SELECT id, quotation_number, date, to_client, currency, grand_total FROM quotations WHERE id = ?', [inv.source_quotation_id], (e, row) => {
+            if (!e) result.quotation = row || null;
+            cb(e);
+          });
+        });
+      }
+
+      if (permissions.purchase_orders && inv.source_purchase_order_id) {
+        tasks.push((cb) => {
+          db.get('SELECT id, po_number, date, supplier_name, po_currency, grand_total FROM purchase_orders WHERE id = ?', [inv.source_purchase_order_id], (e, row) => {
+            if (!e) result.purchaseOrder = row || null;
+            cb(e);
+          });
+        });
+      }
+
+      let idx = 0;
+      const runNext = (err) => {
+        if (err) {
+          return res.status(500).json({ error: 'Failed to load related documents' });
+        }
+        if (idx >= tasks.length) {
+          return res.json(result);
+        }
+        const fn = tasks[idx++];
+        fn(runNext);
+      };
+      runNext(null);
+    });
+  });
+});
+
+// Delete invoice
+app.delete('/api/invoices/:id', requireAuth, checkPermission('invoices'), requireCsrf, writeLimiter, (req, res) => {
+  const { id } = req.params;
+
+  db.run('DELETE FROM invoice_items WHERE invoice_id = ?', [id], (err) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+
+    db.run('DELETE FROM invoices WHERE id = ?', [id], function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+
+      logActivity(req.session.userId, req.session.username, 'delete', 'invoice', id, `Invoice ${id}`, null, null, 'Invoice deleted', req);
+      res.json({ message: 'Invoice deleted successfully' });
+    });
+  });
+});
+
+// Generate Excel for invoice
+app.get('/api/invoices/:id/excel', requireAuth, checkPermission('invoices'), async (req, res) => {
+  const invoiceId = req.params.id;
+
+  try {
+    const invoice = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM invoices WHERE id = ?', [invoiceId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!invoice) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+
+    const items = await new Promise((resolve, reject) => {
+      db.all('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY serial_number', [invoiceId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Invoice');
+
+    worksheet.addRow(['INVOICE']);
+    worksheet.addRow(['NTN#:', invoice.ntn || '4371458-7']);
+    worksheet.addRow(['GST#:', invoice.gst || '2600437145815']);
+    worksheet.addRow(['Ref#:', invoice.ref_no || '']);
+    worksheet.addRow(['A.R.No:', invoice.ar_no || '']);
+    worksheet.addRow(['Date:', invoice.date || '']);
+    worksheet.addRow(['Invoice No#:', invoice.invoice_number || '']);
+    worksheet.addRow(['To:', invoice.to_client || '']);
+    worksheet.addRow([]);
+
+    const columns = [
+      { header: 'Sr.', width: 8, getValue: (item) => item.serial_number },
+      { header: 'Desc', width: 35, getValue: (item) => item.description },
+      { header: 'A/U', width: 10, getValue: (item) => item.au },
+      { header: 'QTy', width: 10, getValue: (item) => item.quantity },
+      { header: 'U/P', width: 12, getValue: (item) => parseFloat(item.unit_price || 0).toFixed(2) },
+      { header: 'T/P', width: 12, getValue: (item) => parseFloat(item.total_price || 0).toFixed(2) },
+      { header: 'Supplier U/P', width: 14, getValue: (item) => parseFloat(item.supplier_up || 0).toFixed(2) },
+      { header: 'Profit Factor', width: 14, getValue: (item) => parseFloat(item.profit_factor || 0).toFixed(2) },
+      { header: 'Exchange Rate', width: 14, getValue: (item) => parseFloat(item.exchange_rate || 0).toFixed(2) },
+      { header: 'Calculated Price', width: 16, getValue: (item) => parseFloat(item.calculated_price || 0).toFixed(2) }
+    ];
+
+    const headerRow = worksheet.addRow(columns.map(c => c.header));
+    headerRow.font = { bold: true };
+
+    items.forEach(item => {
+      worksheet.addRow(columns.map(c => c.getValue(item) || ''));
+    });
+
+    worksheet.addRow([]);
+    worksheet.addRow(['Total price without GST:', parseFloat(invoice.total_without_gst || 0).toFixed(2)]);
+    worksheet.addRow(['GST 18%:', parseFloat(invoice.gst_amount || 0).toFixed(2)]);
+    worksheet.addRow(['Grand Total:', parseFloat(invoice.grand_total || 0).toFixed(2)]);
+
+    worksheet.columns = columns.map(c => ({ width: c.width }));
+
+    const filename = `invoice_${invoiceId}_${Date.now()}.xlsx`;
+    const filepath = path.join(UPLOAD_DIR, 'invoices', filename);
+    await workbook.xlsx.writeFile(filepath);
+
+    logActivity(req.session.userId, req.session.username, 'export', 'invoice', invoiceId, `Invoice ${invoiceId}`, filepath, filename, 'Excel export', req);
+    res.download(filepath, filename);
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
@@ -1830,16 +2782,25 @@ app.get('/api/users', requireAdmin, (req, res) => {
       return res.status(500).json({ error: err.message });
     }
     
-    const usersWithParsedPermissions = users.map(user => ({
-      ...user,
-      permissions: JSON.parse(user.permissions)
-    }));
+    const usersWithParsedPermissions = users.map(user => {
+      let permissions = {};
+      try {
+        permissions = JSON.parse(user.permissions || '{}');
+      } catch (e) {
+        permissions = {};
+      }
+      return {
+        ...user,
+        permissions,
+        status: user.is_active ? 'active' : 'inactive'
+      };
+    });
     
     res.json(usersWithParsedPermissions);
   });
 });
 
-app.post('/api/users', requireAdmin, writeLimiter, (req, res) => {
+app.post('/api/users', requireAdmin, requireCsrf, writeLimiter, (req, res) => {
   const { username, password, email, full_name, role, permissions } = req.body;
   
   if (!username || !password) {
@@ -1864,14 +2825,15 @@ app.post('/api/users', requireAdmin, writeLimiter, (req, res) => {
   );
 });
 
-app.put('/api/users/:id', requireAdmin, writeLimiter, (req, res) => {
+app.put('/api/users/:id', requireAdmin, requireCsrf, writeLimiter, (req, res) => {
   const { id } = req.params;
-  const { email, full_name, role, permissions, is_active } = req.body;
+  const { email, full_name, role, permissions, is_active, status } = req.body;
   
-  const permissionsJson = JSON.stringify(permissions);
+  const permissionsJson = JSON.stringify(permissions || {});
+  const isActiveValue = typeof is_active !== 'undefined' ? (is_active ? 1 : 0) : (status === 'active' ? 1 : 0);
   
   db.run('UPDATE users SET email = ?, full_name = ?, role = ?, permissions = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [email, full_name, role, permissionsJson, is_active, id],
+    [email, full_name, role, permissionsJson, isActiveValue, id],
     function(err) {
       if (err) {
         return res.status(500).json({ error: err.message });
@@ -1882,15 +2844,16 @@ app.put('/api/users/:id', requireAdmin, writeLimiter, (req, res) => {
   );
 });
 
-app.put('/api/users/:id/password', requireAdmin, writeLimiter, (req, res) => {
+app.put('/api/users/:id/password', requireAdmin, requireCsrf, writeLimiter, (req, res) => {
   const { id } = req.params;
-  const { password } = req.body;
+  const { password, new_password } = req.body;
+  const nextPassword = password || new_password;
   
-  if (!password) {
+  if (!nextPassword) {
     return res.status(400).json({ error: 'Password required' });
   }
   
-  const hashedPassword = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+  const hashedPassword = bcrypt.hashSync(nextPassword, BCRYPT_ROUNDS);
   
   db.run('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     [hashedPassword, id],
@@ -1904,7 +2867,7 @@ app.put('/api/users/:id/password', requireAdmin, writeLimiter, (req, res) => {
   );
 });
 
-app.delete('/api/users/:id', requireAdmin, writeLimiter, (req, res) => {
+app.delete('/api/users/:id', requireAdmin, requireCsrf, writeLimiter, (req, res) => {
   const { id } = req.params;
   
   // Don't allow deleting the current user

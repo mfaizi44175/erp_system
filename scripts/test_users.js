@@ -33,7 +33,7 @@ async function login(username, password) {
   if (res.status !== 200) throw new Error('Login failed: ' + JSON.stringify(res.body));
   const setCookie = res.headers['set-cookie'];
   const cookie = Array.isArray(setCookie) ? setCookie.map(c => c.split(';')[0]).join('; ') : '';
-  return { cookie, user: res.body.user };
+  return { cookie, user: res.body.user, csrfToken: res.body.csrfToken || null };
 }
 
 async function listUsers(cookie) {
@@ -44,20 +44,22 @@ async function getUser(cookie, id) {
   return request('GET', `/api/users/${id}`, null, { 'Cookie': cookie });
 }
 
-async function updateUser(cookie, id, payload) {
+async function updateUser(cookie, csrfToken, id, payload) {
   const body = JSON.stringify(payload);
   return request('PUT', `/api/users/${id}`, body, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(body),
+    ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
     'Cookie': cookie
   });
 }
 
-async function updateUserPassword(cookie, id, newPassword) {
+async function updateUserPassword(cookie, csrfToken, id, newPassword) {
   const body = JSON.stringify({ password: newPassword });
   return request('PUT', `/api/users/${id}/password`, body, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(body),
+    ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
     'Cookie': cookie
   });
 }
@@ -70,7 +72,7 @@ async function main() {
   try {
     const adminUsername = process.env.ADMIN_USERNAME || 'admin';
     const adminPassword = process.env.ADMIN_PASSWORD || 'AdminTest!2025';
-    const { cookie: adminCookie } = await login(adminUsername, adminPassword);
+    const { cookie: adminCookie, csrfToken } = await login(adminUsername, adminPassword);
     console.log('Admin login OK');
 
     // List users
@@ -97,7 +99,7 @@ async function main() {
     console.log('User details:', getRes.body.username, getRes.body.status);
 
     // Activate user and update details minimal
-    const updRes = await updateUser(adminCookie, shahzad.id, {
+    const updRes = await updateUser(adminCookie, csrfToken, shahzad.id, {
       email: getRes.body.email || '',
       full_name: getRes.body.full_name || 'Shahzad',
       role: getRes.body.role || 'admin',
@@ -109,7 +111,7 @@ async function main() {
 
     // Update password
     const newPassword = process.env.TEST_USER_PASSWORD || 'ShahzadTemp!2025';
-    const pwdRes = await updateUserPassword(adminCookie, shahzad.id, newPassword);
+    const pwdRes = await updateUserPassword(adminCookie, csrfToken, shahzad.id, newPassword);
     console.log('Update user password status:', pwdRes.status);
     if (pwdRes.status !== 200) throw new Error('Update user password failed: ' + JSON.stringify(pwdRes.body));
 

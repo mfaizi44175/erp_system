@@ -47,7 +47,7 @@ async function login(username, password) {
     throw new Error(`Login failed: status ${res.status}, body: ${res.bodyText}`);
   }
   const cookie = res.setCookie.map(c => c.split(';')[0]).join('; ');
-  return { cookie, user: res.bodyJson?.user };
+  return { cookie, user: res.bodyJson?.user, csrfToken: res.bodyJson?.csrfToken || null };
 }
 
 function buildMultipartBody(fields) {
@@ -61,7 +61,7 @@ function buildMultipartBody(fields) {
   return { boundary, body };
 }
 
-async function createQuery(cookie) {
+async function createQuery(cookie, csrfToken) {
   const itemsStr = JSON.stringify([
     {
       manufacturer_number: 'M001',
@@ -102,6 +102,7 @@ async function createQuery(cookie) {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': body.length,
         'Cookie': cookie,
+        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
       },
     };
     const req = http.request(options, (res) => {
@@ -165,7 +166,7 @@ async function exportQueryExcel(cookie, id) {
   });
 }
 
-async function updateQuery(cookie, id) {
+async function updateQuery(cookie, csrfToken, id) {
   const itemsStr = JSON.stringify([
     {
       manufacturer_number: 'M002',
@@ -205,6 +206,7 @@ async function updateQuery(cookie, id) {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': body.length,
         'Cookie': cookie,
+        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
       },
     };
     const req = http.request(options, (res) => {
@@ -229,12 +231,12 @@ async function updateQuery(cookie, id) {
 async function main() {
   try {
     console.log('Logging in...');
-    const { cookie, user } = await login('admin', 'AdminTest!2025');
+    const { cookie, user, csrfToken } = await login('admin', 'AdminTest!2025');
     console.log('Logged in as:', user?.username);
     console.log('Cookie:', cookie);
 
     console.log('\nCreating query...');
-    const created = await createQuery(cookie);
+    const created = await createQuery(cookie, csrfToken);
     console.log('Create response:', created);
     const qid = created?.id;
     console.log('New query ID:', qid);
@@ -245,7 +247,7 @@ async function main() {
     console.log('Items detail:', q1.items);
 
     console.log('\nUpdating query items...');
-    const upd = await updateQuery(cookie, qid);
+    const upd = await updateQuery(cookie, csrfToken, qid);
     console.log('Update response:', upd);
 
     console.log('\nFetching query after update...');

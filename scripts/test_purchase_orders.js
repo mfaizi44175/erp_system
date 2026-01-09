@@ -48,14 +48,15 @@ async function login(username, password) {
   if (res.status !== 200) throw new Error('Login failed: ' + JSON.stringify(res.body));
   const setCookie = res.headers['set-cookie'];
   const cookie = Array.isArray(setCookie) ? setCookie.map(c => c.split(';')[0]).join('; ') : '';
-  return { cookie, user: res.body.user };
+  return { cookie, user: res.body.user, csrfToken: res.body.csrfToken || null };
 }
 
-async function createPurchaseOrder(cookie, po) {
+async function createPurchaseOrder(cookie, csrfToken, po) {
   const payload = JSON.stringify(po);
   const res = await request('POST', '/api/purchase-orders', payload, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(payload),
+    ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
     'Cookie': cookie
   });
   if (res.status !== 200) throw new Error('Create PO failed: ' + JSON.stringify(res.body));
@@ -70,11 +71,12 @@ async function getPurchaseOrder(cookie, id) {
   return res.body;
 }
 
-async function updatePurchaseOrder(cookie, id, po) {
+async function updatePurchaseOrder(cookie, csrfToken, id, po) {
   const payload = JSON.stringify(po);
   const res = await request('PUT', `/api/purchase-orders/${id}`, payload, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(payload),
+    ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
     'Cookie': cookie
   });
   if (res.status !== 200) throw new Error('Update PO failed: ' + JSON.stringify(res.body));
@@ -96,9 +98,9 @@ async function exportPurchaseOrderExcel(cookie, id, filenameHint = `purchase_ord
 async function main() {
   try {
     const adminUser = process.env.ADMIN_USERNAME || 'admin';
-    const adminPass = process.env.ADMIN_PASSWORD || 'admin';
+    const adminPass = process.env.ADMIN_PASSWORD || 'AdminTest!2025';
     console.log('Logging in as admin...', adminUser);
-    const { cookie } = await login(adminUser, adminPass);
+    const { cookie, csrfToken } = await login(adminUser, adminPass);
     console.log('Login OK');
 
     // Create a PO linked logically to quotation id 3 (no explicit DB link, so we reference in PO number)
@@ -130,7 +132,7 @@ async function main() {
     };
 
     console.log('Creating Purchase Order...');
-    const poId = await createPurchaseOrder(cookie, poCreate);
+    const poId = await createPurchaseOrder(cookie, csrfToken, poCreate);
     console.log('Created PO ID:', poId);
 
     console.log('Fetching created PO...');
@@ -183,7 +185,7 @@ async function main() {
     };
 
     console.log('Updating Purchase Order...');
-    await updatePurchaseOrder(cookie, poId, poUpdate);
+    await updatePurchaseOrder(cookie, csrfToken, poId, poUpdate);
     console.log('PO update OK');
 
     console.log('Fetching updated PO...');

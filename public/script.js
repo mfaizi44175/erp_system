@@ -1,6 +1,7 @@
 // ERP System JavaScript
 
 let csrfToken = null;
+let currentUser = null;
 
 let currentModule = 'queries';
 let currentQueryId = null;
@@ -189,6 +190,9 @@ async function loadModuleData(moduleName) {
             ]);
         } else if (moduleName === 'purchase-orders') {
             await loadPurchaseOrdersEnhanced();
+        } else if (moduleName === 'invoices') {
+            setupInvoiceTable();
+            await loadInvoicesEnhanced();
         } else if (moduleName === 'admin') {
             showAdminModule();
         }
@@ -843,13 +847,80 @@ async function viewQuery(queryId) {
                     </div>
                 </div>
             ` : ''}
+
+            <div class="mt-4" id="related-documents-query"></div>
         `;
+
+        loadRelatedDocumentsForQuery(queryId);
         
         const modal = new bootstrap.Modal(document.getElementById('queryDetailModal'));
         modal.show();
     } catch (error) {
         console.error('Error loading query details:', error);
         showAlert('Error loading query details', 'danger');
+    }
+}
+
+function renderRelatedDocumentsSection(title, blocksHtml) {
+    return `
+        <h6>${title}</h6>
+        <div class="d-flex flex-wrap gap-2">
+            ${blocksHtml || '<span class="text-muted">No related documents</span>'}
+        </div>
+    `;
+}
+
+function relatedButton(label, onClick, variant = 'outline-secondary') {
+    return `<button type="button" class="btn btn-sm btn-${variant}" onclick="${onClick}">${label}</button>`;
+}
+
+function goToQuery(queryId) {
+    showModule('queries');
+    setTimeout(() => viewQuery(queryId), 200);
+}
+
+function goToQuotation(quotationId) {
+    showModule('quotations');
+    setTimeout(() => viewQuotation(quotationId), 200);
+}
+
+function goToPurchaseOrder(poId) {
+    showModule('purchase-orders');
+    setTimeout(() => viewPurchaseOrder(poId), 200);
+}
+
+function goToInvoice(invoiceId) {
+    showModule('invoices');
+    setTimeout(() => viewInvoice(invoiceId), 200);
+}
+
+async function loadRelatedDocumentsForQuery(queryId) {
+    const container = document.getElementById('related-documents-query');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted">Loading related documents...</div>';
+
+    try {
+        const resp = await fetch(`/api/queries/${queryId}/related`, { credentials: 'include' });
+        const data = await resp.json();
+        if (!resp.ok) {
+            container.innerHTML = `<div class="text-danger">${escapeHtml(data.error || 'Failed to load related documents')}</div>`;
+            return;
+        }
+
+        const qButtons = (data.quotations || []).map(q => relatedButton(`Quotation: ${escapeHtml(q.quotation_number || ('#' + q.id))}`, `goToQuotation(${q.id})`, 'outline-primary')).join('');
+        const poButtons = (data.purchaseOrders || []).map(po => relatedButton(`PO: ${escapeHtml(po.po_number || ('#' + po.id))}`, `goToPurchaseOrder(${po.id})`, 'outline-success')).join('');
+        const invButtons = (data.invoices || []).map(inv => relatedButton(`Invoice: ${escapeHtml(inv.invoice_number || ('#' + inv.id))}`, `goToInvoice(${inv.id})`, 'outline-dark')).join('');
+
+        const blocks = [
+            qButtons ? `<div class="me-3">${renderRelatedDocumentsSection('Quotations', qButtons)}</div>` : '',
+            poButtons ? `<div class="me-3">${renderRelatedDocumentsSection('Purchase Orders', poButtons)}</div>` : '',
+            invButtons ? `<div class="me-3">${renderRelatedDocumentsSection('Invoices', invButtons)}</div>` : ''
+        ].filter(Boolean).join('');
+
+        container.innerHTML = blocks || renderRelatedDocumentsSection('Related Documents', '');
+    } catch (e) {
+        console.error('Error loading related docs for query:', e);
+        container.innerHTML = '<div class="text-danger">Failed to load related documents</div>';
     }
 }
 
@@ -1188,6 +1259,7 @@ function displayQuotations(quotations) {
 
 // Create quotation table row
 function createQuotationTableRow(quotation) {
+    const isAdmin = !!(currentUser && currentUser.role === 'admin');
     return `
         <tr>
             <td>${quotation.quotation_number || 'N/A'}</td>
@@ -1203,6 +1275,11 @@ function createQuotationTableRow(quotation) {
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="editQuotation(${quotation.id})" title="Edit">
                         <i class="fas fa-edit"></i>
                     </button>
+                    ${isAdmin ? `
+                        <button type="button" class="btn btn-sm btn-outline-warning" onclick="approveQuotationToInvoice(${quotation.id})" title="Approve to Invoice">
+                            <i class="fas fa-check"></i>
+                        </button>
+                    ` : ''}
                     <button type="button" class="btn btn-sm btn-outline-success" onclick="generateQuotationExcelById(${quotation.id})" title="Generate Excel">
                         <i class="fas fa-file-excel"></i>
                     </button>
@@ -1221,20 +1298,32 @@ function createQuotationTableRow(quotation) {
 // Load queries for quotation dropdown
 async function loadQueriesForQuotation() {
     try {
-        const response = await fetch('/api/queries');
+        const response = await fetch('/api/queries/for-quotation');
         const queries = await response.json();
         
         const select = document.getElementById('linked-query');
+        const tenderCaseNoInput = document.getElementById('tender-case-no');
+        if (!select) return;
         select.innerHTML = '<option value="">Select Query</option>';
         
         if (Array.isArray(queries)) {
             queries.forEach(query => {
                 const option = document.createElement('option');
                 option.value = query.id;
-                option.textContent = query.nsets_case_number + ' - ' + query.client_name;
+                option.textContent = (query.nsets_case_number || '') + ' - ' + (query.client_name || '');
+                option.dataset.caseNumber = query.nsets_case_number || '';
                 select.appendChild(option);
             });
         }
+
+        select.onchange = () => {
+            if (!tenderCaseNoInput) return;
+            if (tenderCaseNoInput.value) return;
+            const selected = select.options[select.selectedIndex];
+            if (selected && selected.dataset.caseNumber) {
+                tenderCaseNoInput.value = selected.dataset.caseNumber;
+            }
+        };
     } catch (error) {
         console.error('Error loading queries for quotation:', error);
     }
@@ -1276,6 +1365,9 @@ function resetQuotationForm() {
     
     // Set default quotation type to local
     document.getElementById('quotation-type').value = 'local';
+
+    const tenderCaseNoInput = document.getElementById('tender-case-no');
+    if (tenderCaseNoInput) tenderCaseNoInput.value = '';
     
     // Initialize GST/Freight display
     toggleGSTFreight();
@@ -1298,6 +1390,8 @@ async function loadQuotationForEdit(quotationId) {
 
         const quotationIdInput = document.getElementById('quotation-id');
         if (quotationIdInput) quotationIdInput.value = quotation.id;
+        const tenderCaseNoInput = document.getElementById('tender-case-no');
+        if (tenderCaseNoInput) tenderCaseNoInput.value = quotation.tender_case_no || '';
         const quotationNumberInput = document.getElementById('quotation-number');
         if (quotationNumberInput) quotationNumberInput.value = quotation.quotation_number || '';
         const quotationDateInput = document.getElementById('quotation-date');
@@ -1556,6 +1650,7 @@ async function handleQuotationSubmit(event) {
     
     // Prepare data object
     const data = {
+        tender_case_no: formData.get('tender_case_no'),
         quotation_number: formData.get('quotation_number'),
         date: formData.get('date'),
         to_client: formData.get('to_client'),
@@ -1584,7 +1679,8 @@ async function handleQuotationSubmit(event) {
         const response = await fetch(url, {
             method: method,
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
             },
             body: JSON.stringify(data)
         });
@@ -1616,6 +1712,7 @@ async function viewQuotation(quotationId) {
                 <div class="col-md-6">
                     <h6>Quotation Information</h6>
                     <table class="table table-sm">
+                        <tr><td><strong>Tender No/Case No:</strong></td><td>${quotation.tender_case_no || ''}</td></tr>
                         <tr><td><strong>Quotation Number:</strong></td><td>${quotation.quotation_number}</td></tr>
                         <tr><td><strong>Date:</strong></td><td>${formatDate(quotation.date)}</td></tr>
                         <tr><td><strong>To:</strong></td><td>${quotation.to_client}</td></tr>
@@ -1683,14 +1780,50 @@ async function viewQuotation(quotationId) {
                             </table>
                         </div>
                     </div>
+
+                    <div class="mt-4" id="related-documents-quotation"></div>
                 </div>
             `;
+
+        loadRelatedDocumentsForQuotation(quotationId);
         
         const modal = new bootstrap.Modal(document.getElementById('queryDetailModal'));
         modal.show();
     } catch (error) {
         console.error('Error loading quotation details:', error);
         showAlert('Error loading quotation details', 'danger');
+    }
+}
+
+async function loadRelatedDocumentsForQuotation(quotationId) {
+    const container = document.getElementById('related-documents-quotation');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted">Loading related documents...</div>';
+
+    try {
+        const resp = await fetch(`/api/quotations/${quotationId}/related`, { credentials: 'include' });
+        const data = await resp.json();
+        if (!resp.ok) {
+            container.innerHTML = `<div class="text-danger">${escapeHtml(data.error || 'Failed to load related documents')}</div>`;
+            return;
+        }
+
+        const queryButton = data.query
+            ? relatedButton(`Query: ${escapeHtml(data.query.nsets_case_number || ('#' + data.query.id))}`, `goToQuery(${data.query.id})`, 'outline-primary')
+            : '';
+        const poButtons = (data.purchaseOrders || []).map(po => relatedButton(`PO: ${escapeHtml(po.po_number || ('#' + po.id))}`, `goToPurchaseOrder(${po.id})`, 'outline-success')).join('');
+        const invButtons = (data.invoices || []).map(inv => relatedButton(`Invoice: ${escapeHtml(inv.invoice_number || ('#' + inv.id))}`, `goToInvoice(${inv.id})`, 'outline-dark')).join('');
+
+        const blocks = [
+            queryButton ? `<div class="me-3">${renderRelatedDocumentsSection('Query', queryButton)}</div>` : '',
+            poButtons ? `<div class="me-3">${renderRelatedDocumentsSection('Purchase Orders', poButtons)}</div>` : '',
+            invButtons ? `<div class="me-3">${renderRelatedDocumentsSection('Invoices', invButtons)}</div>` : ''
+        ].filter(Boolean).join('');
+
+        container.innerHTML = blocks || renderRelatedDocumentsSection('Related Documents', '');
+    } catch (e) {
+        console.error('Error loading related docs for quotation:', e);
+        container.innerHTML = '<div class="text-danger">Failed to load related documents</div>';
     }
 }
 
@@ -1707,20 +1840,65 @@ async function deleteQuotation(quotationId) {
     
     try {
         const response = await fetch('/api/quotations/' + quotationId, {
-            method: 'DELETE'
+            method: 'DELETE',
+            credentials: 'include',
+            headers: csrfToken ? { 'x-csrf-token': csrfToken } : {}
         });
-        
-        const result = await response.json();
+
+        let result = null;
+        try {
+            result = await response.json();
+        } catch {
+            result = null;
+        }
         
         if (response.ok) {
             showAlert('Quotation deleted successfully', 'success');
             loadQuotationsEnhanced();
         } else {
-            showAlert(result.error || 'Error deleting quotation', 'danger');
+            showAlert((result && result.error) || `Error deleting quotation (HTTP ${response.status})`, 'danger');
         }
     } catch (error) {
         console.error('Error deleting quotation:', error);
         showAlert('Error deleting quotation', 'danger');
+    }
+}
+
+async function approveQuotationToInvoice(quotationId) {
+    if (!confirm('Approve this quotation and create an invoice copy?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/quotations/${quotationId}/approve-to-invoice`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
+            },
+            body: JSON.stringify({})
+        });
+
+        const result = await response.json();
+        if (!response.ok) {
+            showAlert(result.error || 'Failed to approve quotation', 'danger');
+            return;
+        }
+
+        showAlert('Invoice created from quotation', 'success');
+        showModule('invoices');
+        setTimeout(() => {
+            try {
+                showInvoiceForm(result.invoiceId);
+            } catch (e) {
+                console.error('Failed to open invoice form:', e);
+                loadInvoices();
+            }
+        }, 200);
+    } catch (error) {
+        console.error('Error approving quotation:', error);
+        showAlert('Error approving quotation', 'danger');
     }
 }
 
@@ -1990,6 +2168,8 @@ async function loadPurchaseOrderForEdit(poId) {
         if (poNumberInput) poNumberInput.value = po.po_number;
         const poDateInput = document.getElementById('po-date');
         if (poDateInput) poDateInput.value = po.date;
+        const poSubjectInput = document.getElementById('po-subject');
+        if (poSubjectInput) poSubjectInput.value = po.subject || '';
         const supplierNameInput = document.getElementById('supplier-name');
         if (supplierNameInput) supplierNameInput.value = po.supplier_name;
         const supplierAddressInput = document.getElementById('supplier-address');
@@ -2167,6 +2347,7 @@ async function handlePurchaseOrderSubmit(event) {
     const purchaseOrderData = {
         po_number: formData.get('po_number'),
         date: formData.get('date'),
+        subject: formData.get('subject'),
         supplier_name: formData.get('supplier_name'),
         supplier_address: formData.get('supplier_address'),
         po_currency: formData.get('po_currency') || 'INR',
@@ -2183,7 +2364,8 @@ async function handlePurchaseOrderSubmit(event) {
         const response = await fetch(url, {
             method: method,
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
             },
             body: JSON.stringify(purchaseOrderData)
         });
@@ -2216,6 +2398,7 @@ async function viewPurchaseOrder(poId) {
                     <table class="table table-sm">
                         <tr><td><strong>PO Number:</strong></td><td>${po.po_number}</td></tr>
                         <tr><td><strong>Date:</strong></td><td>${formatDate(po.date)}</td></tr>
+                        <tr><td><strong>Subject:</strong></td><td>${po.subject || ''}</td></tr>
                         <tr><td><strong>Supplier Name:</strong></td><td>${po.supplier_name}</td></tr>
                         <tr><td><strong>Supplier Address:</strong></td><td>${po.supplier_address}</td></tr>
                     </table>
@@ -2274,13 +2457,51 @@ async function viewPurchaseOrder(poId) {
                     </div>
                 </div>
             ` : '<div class="mt-4"><p class="text-muted">No items found.</p></div>'}
+
+            <div class="mt-4" id="related-documents-po"></div>
         `;
+
+        loadRelatedDocumentsForPurchaseOrder(poId);
         
         const modal = new bootstrap.Modal(document.getElementById('purchaseOrderDetailModal'));
         modal.show();
     } catch (error) {
         console.error('Error loading purchase order:', error);
         showAlert('Error loading purchase order details', 'danger');
+    }
+}
+
+async function loadRelatedDocumentsForPurchaseOrder(poId) {
+    const container = document.getElementById('related-documents-po');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted">Loading related documents...</div>';
+
+    try {
+        const resp = await fetch(`/api/purchase-orders/${poId}/related`, { credentials: 'include' });
+        const data = await resp.json();
+        if (!resp.ok) {
+            container.innerHTML = `<div class="text-danger">${escapeHtml(data.error || 'Failed to load related documents')}</div>`;
+            return;
+        }
+
+        const queryButton = data.query
+            ? relatedButton(`Query: ${escapeHtml(data.query.nsets_case_number || ('#' + data.query.id))}`, `goToQuery(${data.query.id})`, 'outline-primary')
+            : '';
+        const quotationButton = data.quotation
+            ? relatedButton(`Quotation: ${escapeHtml(data.quotation.quotation_number || ('#' + data.quotation.id))}`, `goToQuotation(${data.quotation.id})`, 'outline-secondary')
+            : '';
+        const invButtons = (data.invoices || []).map(inv => relatedButton(`Invoice: ${escapeHtml(inv.invoice_number || ('#' + inv.id))}`, `goToInvoice(${inv.id})`, 'outline-dark')).join('');
+
+        const blocks = [
+            queryButton ? `<div class="me-3">${renderRelatedDocumentsSection('Query', queryButton)}</div>` : '',
+            quotationButton ? `<div class="me-3">${renderRelatedDocumentsSection('Quotation', quotationButton)}</div>` : '',
+            invButtons ? `<div class="me-3">${renderRelatedDocumentsSection('Invoices', invButtons)}</div>` : ''
+        ].filter(Boolean).join('');
+
+        container.innerHTML = blocks || renderRelatedDocumentsSection('Related Documents', '');
+    } catch (e) {
+        console.error('Error loading related docs for PO:', e);
+        container.innerHTML = '<div class="text-danger">Failed to load related documents</div>';
     }
 }
 
@@ -2801,6 +3022,584 @@ function clearPOFilters() {
     filterPurchaseOrders();
 }
 
+let currentInvoiceId = null;
+let invoiceItemCounter = 0;
+let allInvoices = [];
+let invoiceSortColumn = 'date';
+let invoiceSortDirection = 'desc';
+
+async function loadInvoices() {
+    try {
+        const response = await fetch('/api/invoices');
+        const invoices = await response.json();
+        allInvoices = Array.isArray(invoices) ? invoices : [];
+        displayInvoices(allInvoices);
+    } catch (error) {
+        console.error('Error loading invoices:', error);
+        showAlert('Error loading invoices', 'danger');
+    }
+}
+
+function loadInvoicesEnhanced() {
+    return loadInvoices();
+}
+
+function displayInvoices(invoices) {
+    const tbody = document.getElementById('invoices-table-body');
+    const emptyState = document.getElementById('invoices-empty-state');
+
+    if (!tbody || !emptyState) return;
+
+    if (!invoices || invoices.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.classList.remove('d-none');
+        return;
+    }
+
+    emptyState.classList.add('d-none');
+    tbody.innerHTML = invoices.map(inv => createInvoiceTableRow(inv)).join('');
+}
+
+function createInvoiceTableRow(invoice) {
+    return `
+        <tr>
+            <td>${escapeHtml(invoice.invoice_number || 'N/A')}</td>
+            <td>${formatDate(invoice.date)}</td>
+            <td>${escapeHtml(invoice.to_client || 'N/A')}</td>
+            <td>${escapeHtml(invoice.ref_no || '')}</td>
+            <td><strong>${parseFloat(invoice.grand_total || 0).toFixed(2)}</strong></td>
+            <td>
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewInvoice(${invoice.id})" title="View Details">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="editInvoice(${invoice.id})" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-success" onclick="generateInvoiceExcelById(${invoice.id})" title="Generate Excel">
+                        <i class="fas fa-file-excel"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteInvoice(${invoice.id})" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    `;
+}
+
+function showInvoiceForm(invoiceId = null) {
+    currentInvoiceId = invoiceId;
+    const dashboard = document.getElementById('invoice-dashboard');
+    const container = document.getElementById('invoice-form-container');
+    if (dashboard) dashboard.classList.add('d-none');
+    if (container) container.classList.remove('d-none');
+
+    const title = document.getElementById('invoice-form-title');
+    if (invoiceId) {
+        if (title) title.textContent = 'Edit Invoice';
+        loadInvoiceForEdit(invoiceId);
+    } else {
+        if (title) title.textContent = 'New Invoice';
+        resetInvoiceForm();
+    }
+}
+
+function hideInvoiceForm() {
+    const dashboard = document.getElementById('invoice-dashboard');
+    const container = document.getElementById('invoice-form-container');
+    if (dashboard) dashboard.classList.remove('d-none');
+    if (container) container.classList.add('d-none');
+    resetInvoiceForm();
+    currentInvoiceId = null;
+}
+
+function resetInvoiceForm() {
+    const form = document.getElementById('invoice-form');
+    if (form) form.reset();
+    const idInput = document.getElementById('invoice-id');
+    if (idInput) idInput.value = '';
+    const tbody = document.getElementById('invoice-items-tbody');
+    if (tbody) tbody.innerHTML = '';
+    invoiceItemCounter = 0;
+
+    const today = new Date().toISOString().split('T')[0];
+    const dateInput = document.getElementById('invoice-date');
+    if (dateInput) dateInput.value = today;
+
+    updateInvoiceTotalDisplays(0, 0, 0);
+    addInvoiceItem();
+}
+
+async function loadInvoiceForEdit(invoiceId) {
+    try {
+        const response = await fetch(`/api/invoices/${invoiceId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const invoice = await response.json();
+
+        const idInput = document.getElementById('invoice-id');
+        if (idInput) idInput.value = invoice.id;
+        const refNoInput = document.getElementById('invoice-ref-no');
+        if (refNoInput) refNoInput.value = invoice.ref_no || '';
+        const arNoInput = document.getElementById('invoice-ar-no');
+        if (arNoInput) arNoInput.value = invoice.ar_no || '';
+        const dateInput = document.getElementById('invoice-date');
+        if (dateInput) dateInput.value = invoice.date || '';
+        const invoiceNoInput = document.getElementById('invoice-number');
+        if (invoiceNoInput) invoiceNoInput.value = invoice.invoice_number || '';
+        const toInput = document.getElementById('invoice-to');
+        if (toInput) toInput.value = invoice.to_client || '';
+
+        const tbody = document.getElementById('invoice-items-tbody');
+        if (tbody) tbody.innerHTML = '';
+        invoiceItemCounter = 0;
+
+        if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
+            invoice.items.forEach(item => addInvoiceItemRow(item));
+        } else {
+            addInvoiceItem();
+        }
+
+        updateInvoiceTotalDisplays(
+            invoice.total_without_gst || 0,
+            invoice.gst_amount || 0,
+            invoice.grand_total || 0
+        );
+    } catch (error) {
+        console.error('Error loading invoice for edit:', error);
+        showAlert('Error loading invoice data', 'danger');
+    }
+}
+
+function addInvoiceItem(itemData = null) {
+    addInvoiceItemRow(itemData);
+}
+
+function addInvoiceItemRow(itemData = null) {
+    invoiceItemCounter++;
+    const tbody = document.getElementById('invoice-items-tbody');
+    if (!tbody) return;
+
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td class="serial-number">${invoiceItemCounter}</td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.description || '')}" placeholder="Description"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${escapeHtml(itemData?.au || '')}" placeholder="A/U"></td>
+        <td><input type="number" class="form-control form-control-sm qty-input" value="${escapeHtml(itemData?.quantity || '')}" placeholder="Qty" min="0" onchange="calculateInvoiceRowTotal(this)"></td>
+        <td><input type="number" class="form-control form-control-sm up-input" value="${escapeHtml(itemData?.unit_price || '')}" placeholder="U/P" step="0.01" min="0" onchange="calculateInvoiceRowTotal(this)"></td>
+        <td><input type="number" class="form-control form-control-sm tp-input" value="${escapeHtml(itemData?.total_price || '')}" placeholder="T/P" step="0.01" readonly></td>
+        <td><input type="number" class="form-control form-control-sm supplier-up-input" value="${escapeHtml(itemData?.supplier_up || '')}" placeholder="Supplier U/P" step="0.01" min="0" onchange="calculateInvoiceCalculatedPrice(this)"></td>
+        <td><input type="number" class="form-control form-control-sm profit-factor-input" value="${escapeHtml(itemData?.profit_factor || '')}" placeholder="Profit Factor" step="0.01" min="0" onchange="calculateInvoiceCalculatedPrice(this)"></td>
+        <td><input type="number" class="form-control form-control-sm exchange-rate-input" value="${escapeHtml(itemData?.exchange_rate || '')}" placeholder="Exchange Rate" step="0.01" min="0" onchange="calculateInvoiceCalculatedPrice(this)"></td>
+        <td><input type="number" class="form-control form-control-sm calculated-price-input" value="${escapeHtml(itemData?.calculated_price || '')}" placeholder="Calculated Price" step="0.01" readonly></td>
+        <td>
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteInvoiceItemRow(this)">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>
+    `;
+    tbody.appendChild(row);
+    updateInvoiceSerialNumbers();
+
+    const supplierUp = parseFloat(itemData?.supplier_up) || 0;
+    const profitFactor = parseFloat(itemData?.profit_factor) || 0;
+    const exchangeRate = parseFloat(itemData?.exchange_rate) || 0;
+    if (supplierUp || profitFactor || exchangeRate) {
+        const calc = supplierUp * profitFactor * exchangeRate;
+        const calcInput = row.querySelector('.calculated-price-input');
+        if (calcInput) calcInput.value = calc.toFixed(2);
+    }
+}
+
+function deleteInvoiceItemRow(button) {
+    button.closest('tr').remove();
+    updateInvoiceSerialNumbers();
+    calculateInvoiceTotals();
+}
+
+function updateInvoiceSerialNumbers() {
+    const rows = document.querySelectorAll('#invoice-items-tbody tr');
+    rows.forEach((row, index) => {
+        const cell = row.querySelector('.serial-number');
+        if (cell) cell.textContent = index + 1;
+    });
+    invoiceItemCounter = rows.length;
+}
+
+function calculateInvoiceRowTotal(input) {
+    const row = input.closest('tr');
+    const qty = parseFloat(row.querySelector('.qty-input').value) || 0;
+    const up = parseFloat(row.querySelector('.up-input').value) || 0;
+    const tp = qty * up;
+    row.querySelector('.tp-input').value = tp.toFixed(2);
+    calculateInvoiceTotals();
+}
+
+function calculateInvoiceCalculatedPrice(input) {
+    const row = input.closest('tr');
+    const supplierUp = parseFloat(row.querySelector('.supplier-up-input').value) || 0;
+    const profitFactor = parseFloat(row.querySelector('.profit-factor-input').value) || 0;
+    const exchangeRate = parseFloat(row.querySelector('.exchange-rate-input').value) || 0;
+    const calc = supplierUp * profitFactor * exchangeRate;
+    row.querySelector('.calculated-price-input').value = calc.toFixed(2);
+}
+
+function calculateInvoiceTotals() {
+    const rows = document.querySelectorAll('#invoice-items-tbody tr');
+    let totalWithoutGst = 0;
+    rows.forEach(row => {
+        const tp = parseFloat(row.querySelector('.tp-input').value) || 0;
+        totalWithoutGst += tp;
+    });
+    const gstAmount = totalWithoutGst * 0.18;
+    const grandTotal = totalWithoutGst + gstAmount;
+    updateInvoiceTotalDisplays(totalWithoutGst, gstAmount, grandTotal);
+}
+
+function updateInvoiceTotalDisplays(totalWithoutGst, gstAmount, grandTotal) {
+    const totalEl = document.getElementById('invoice-total-without-gst');
+    const gstEl = document.getElementById('invoice-gst-amount');
+    const grandEl = document.getElementById('invoice-grand-total');
+    const totalInput = document.getElementById('invoice-total-without-gst-input');
+    const gstInput = document.getElementById('invoice-gst-amount-input');
+    const grandInput = document.getElementById('invoice-grand-total-input');
+
+    const totalFixed = parseFloat(totalWithoutGst || 0).toFixed(2);
+    const gstFixed = parseFloat(gstAmount || 0).toFixed(2);
+    const grandFixed = parseFloat(grandTotal || 0).toFixed(2);
+
+    if (totalEl) totalEl.textContent = totalFixed;
+    if (gstEl) gstEl.textContent = gstFixed;
+    if (grandEl) grandEl.textContent = grandFixed;
+    if (totalInput) totalInput.value = totalFixed;
+    if (gstInput) gstInput.value = gstFixed;
+    if (grandInput) grandInput.value = grandFixed;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const invoiceForm = document.getElementById('invoice-form');
+    if (invoiceForm) {
+        invoiceForm.addEventListener('submit', handleInvoiceSubmit);
+    }
+
+    const invoiceSearch = document.getElementById('invoice-search');
+    if (invoiceSearch) {
+        invoiceSearch.addEventListener('input', filterInvoices);
+    }
+});
+
+async function handleInvoiceSubmit(event) {
+    event.preventDefault();
+
+    calculateInvoiceTotals();
+
+    const formData = new FormData(event.target);
+    const invoiceId = formData.get('invoice-id');
+
+    const items = [];
+    const rows = document.querySelectorAll('#invoice-items-tbody tr');
+    rows.forEach((row, index) => {
+        const inputs = row.querySelectorAll('input');
+        const item = {
+            serial_number: index + 1,
+            description: inputs[0].value,
+            au: inputs[1].value,
+            quantity: parseFloat(inputs[2].value) || 0,
+            unit_price: parseFloat(inputs[3].value) || 0,
+            total_price: parseFloat(inputs[4].value) || 0,
+            supplier_up: parseFloat(inputs[5].value) || 0,
+            profit_factor: parseFloat(inputs[6].value) || 0,
+            exchange_rate: parseFloat(inputs[7].value) || 0,
+            calculated_price: parseFloat(inputs[8].value) || 0
+        };
+        if (item.description || item.quantity || item.unit_price) {
+            items.push(item);
+        }
+    });
+
+    const invoiceData = {
+        ref_no: formData.get('ref_no'),
+        ar_no: formData.get('ar_no') || null,
+        date: formData.get('date'),
+        invoice_number: formData.get('invoice_number'),
+        to_client: formData.get('to_client'),
+        total_without_gst: parseFloat(formData.get('total_without_gst')) || 0,
+        gst_amount: parseFloat(formData.get('gst_amount')) || 0,
+        grand_total: parseFloat(formData.get('grand_total')) || 0,
+        items
+    };
+
+    try {
+        const url = invoiceId ? `/api/invoices/${invoiceId}` : '/api/invoices';
+        const method = invoiceId ? 'PUT' : 'POST';
+
+        const response = await fetch(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
+            },
+            body: JSON.stringify(invoiceData)
+        });
+
+        if (response.ok) {
+            showAlert(invoiceId ? 'Invoice updated successfully!' : 'Invoice created successfully!', 'success');
+            hideInvoiceForm();
+            loadInvoices();
+        } else {
+            const error = await response.json();
+            showAlert('Error saving invoice: ' + (error.error || 'Unknown error'), 'danger');
+        }
+    } catch (error) {
+        console.error('Error saving invoice:', error);
+        showAlert('Error saving invoice', 'danger');
+    }
+}
+
+async function viewInvoice(invoiceId) {
+    try {
+        const response = await fetch(`/api/invoices/${invoiceId}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const invoice = await response.json();
+
+        const modalContent = document.getElementById('invoice-detail-content');
+        if (!modalContent) return;
+
+        modalContent.innerHTML = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Invoice Information</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>NTN#:</strong></td><td>${escapeHtml(invoice.ntn || '4371458-7')}</td></tr>
+                        <tr><td><strong>GST#:</strong></td><td>${escapeHtml(invoice.gst || '2600437145815')}</td></tr>
+                        <tr><td><strong>Ref#:</strong></td><td>${escapeHtml(invoice.ref_no || '')}</td></tr>
+                        <tr><td><strong>A.R.No:</strong></td><td>${escapeHtml(invoice.ar_no || '')}</td></tr>
+                        <tr><td><strong>Date:</strong></td><td>${formatDate(invoice.date)}</td></tr>
+                        <tr><td><strong>Invoice No#:</strong></td><td>${escapeHtml(invoice.invoice_number || '')}</td></tr>
+                        <tr><td><strong>To:</strong></td><td>${escapeHtml(invoice.to_client || '')}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6>Totals</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Total without GST:</strong></td><td>${parseFloat(invoice.total_without_gst || 0).toFixed(2)}</td></tr>
+                        <tr><td><strong>GST 18%:</strong></td><td>${parseFloat(invoice.gst_amount || 0).toFixed(2)}</td></tr>
+                        <tr><td><strong>Grand Total:</strong></td><td><strong>${parseFloat(invoice.grand_total || 0).toFixed(2)}</strong></td></tr>
+                    </table>
+                </div>
+            </div>
+            ${invoice.items && invoice.items.length > 0 ? `
+                <div class="mt-4">
+                    <h6>Items</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Sr.</th>
+                                    <th>Desc</th>
+                                    <th>A/U</th>
+                                    <th>QTy</th>
+                                    <th>U/P</th>
+                                    <th>T/P</th>
+                                    <th>Supplier U/P</th>
+                                    <th>Profit Factor</th>
+                                    <th>Exchange Rate</th>
+                                    <th>Calculated Price</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${invoice.items.map(item => `
+                                    <tr>
+                                        <td>${item.serial_number}</td>
+                                        <td>${escapeHtml(item.description || '')}</td>
+                                        <td>${escapeHtml(item.au || '')}</td>
+                                        <td>${parseFloat(item.quantity || 0)}</td>
+                                        <td>${parseFloat(item.unit_price || 0).toFixed(2)}</td>
+                                        <td>${parseFloat(item.total_price || 0).toFixed(2)}</td>
+                                        <td>${parseFloat(item.supplier_up || 0).toFixed(2)}</td>
+                                        <td>${parseFloat(item.profit_factor || 0).toFixed(2)}</td>
+                                        <td>${parseFloat(item.exchange_rate || 0).toFixed(2)}</td>
+                                        <td>${parseFloat(item.calculated_price || 0).toFixed(2)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            ` : '<div class="mt-4"><p class="text-muted">No items found.</p></div>'}
+
+            <div class="mt-4" id="related-documents-invoice"></div>
+        `;
+
+        loadRelatedDocumentsForInvoice(invoiceId);
+
+        const modal = new bootstrap.Modal(document.getElementById('invoiceDetailModal'));
+        modal.show();
+    } catch (error) {
+        console.error('Error loading invoice:', error);
+        showAlert('Error loading invoice details', 'danger');
+    }
+}
+
+async function loadRelatedDocumentsForInvoice(invoiceId) {
+    const container = document.getElementById('related-documents-invoice');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted">Loading related documents...</div>';
+
+    try {
+        const resp = await fetch(`/api/invoices/${invoiceId}/related`, { credentials: 'include' });
+        const data = await resp.json();
+        if (!resp.ok) {
+            container.innerHTML = `<div class="text-danger">${escapeHtml(data.error || 'Failed to load related documents')}</div>`;
+            return;
+        }
+
+        const queryButton = data.query
+            ? relatedButton(`Query: ${escapeHtml(data.query.nsets_case_number || ('#' + data.query.id))}`, `goToQuery(${data.query.id})`, 'outline-primary')
+            : '';
+        const quotationButton = data.quotation
+            ? relatedButton(`Quotation: ${escapeHtml(data.quotation.quotation_number || ('#' + data.quotation.id))}`, `goToQuotation(${data.quotation.id})`, 'outline-secondary')
+            : '';
+        const poButton = data.purchaseOrder
+            ? relatedButton(`PO: ${escapeHtml(data.purchaseOrder.po_number || ('#' + data.purchaseOrder.id))}`, `goToPurchaseOrder(${data.purchaseOrder.id})`, 'outline-success')
+            : '';
+
+        const blocks = [
+            queryButton ? `<div class="me-3">${renderRelatedDocumentsSection('Query', queryButton)}</div>` : '',
+            quotationButton ? `<div class="me-3">${renderRelatedDocumentsSection('Quotation', quotationButton)}</div>` : '',
+            poButton ? `<div class="me-3">${renderRelatedDocumentsSection('Purchase Order', poButton)}</div>` : ''
+        ].filter(Boolean).join('');
+
+        container.innerHTML = blocks || renderRelatedDocumentsSection('Related Documents', '');
+    } catch (e) {
+        console.error('Error loading related docs for invoice:', e);
+        container.innerHTML = '<div class="text-danger">Failed to load related documents</div>';
+    }
+}
+
+function editInvoice(invoiceId) {
+    showInvoiceForm(invoiceId);
+}
+
+async function deleteInvoice(invoiceId) {
+    if (!confirm('Are you sure you want to delete this invoice?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/invoices/${invoiceId}`, {
+            method: 'DELETE',
+            headers: csrfToken ? { 'x-csrf-token': csrfToken } : {}
+        });
+
+        if (response.ok) {
+            showAlert('Invoice deleted successfully', 'success');
+            loadInvoices();
+        } else {
+            const error = await response.json();
+            showAlert('Error deleting invoice: ' + (error.error || 'Unknown error'), 'danger');
+        }
+    } catch (error) {
+        console.error('Error deleting invoice:', error);
+        showAlert('Error deleting invoice', 'danger');
+    }
+}
+
+function generateInvoiceExcelById(invoiceId) {
+    window.open('/api/invoices/' + invoiceId + '/excel', '_blank');
+}
+
+function generateInvoiceExcel() {
+    if (!currentInvoiceId) {
+        showAlert('Please save the invoice first before generating Excel', 'warning');
+        return;
+    }
+    generateInvoiceExcelById(currentInvoiceId);
+}
+
+function setupInvoiceTable() {
+    const sortableHeaders = document.querySelectorAll('#invoices-table .sortable');
+    sortableHeaders.forEach(header => {
+        header.addEventListener('click', () => {
+            const column = header.getAttribute('data-sort');
+            sortInvoices(column);
+        });
+    });
+}
+
+function filterInvoices() {
+    const searchTermEl = document.getElementById('invoice-search');
+    const searchTerm = (searchTermEl ? searchTermEl.value : '').toLowerCase();
+
+    const filtered = allInvoices.filter(inv => {
+        const matches = !searchTerm ||
+            (inv.invoice_number && inv.invoice_number.toLowerCase().includes(searchTerm)) ||
+            (inv.ref_no && inv.ref_no.toLowerCase().includes(searchTerm)) ||
+            (inv.to_client && inv.to_client.toLowerCase().includes(searchTerm));
+        return matches;
+    });
+
+    displayInvoices(filtered);
+}
+
+function sortInvoices(column) {
+    if (invoiceSortColumn === column) {
+        invoiceSortDirection = invoiceSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        invoiceSortColumn = column;
+        invoiceSortDirection = 'asc';
+    }
+
+    const sorted = [...allInvoices].sort((a, b) => {
+        let aVal = a[column];
+        let bVal = b[column];
+
+        if (column === 'date') {
+            aVal = new Date(aVal);
+            bVal = new Date(bVal);
+        } else if (column === 'grand_total') {
+            aVal = parseFloat(aVal) || 0;
+            bVal = parseFloat(bVal) || 0;
+        } else {
+            aVal = String(aVal || '').toLowerCase();
+            bVal = String(bVal || '').toLowerCase();
+        }
+
+        if (aVal < bVal) return invoiceSortDirection === 'asc' ? -1 : 1;
+        if (aVal > bVal) return invoiceSortDirection === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    displayInvoices(sorted);
+    updateInvoiceSortIcons();
+}
+
+function updateInvoiceSortIcons() {
+    const headers = document.querySelectorAll('#invoices-table .sortable');
+    headers.forEach(header => {
+        const icon = header.querySelector('.sort-icon');
+        const column = header.getAttribute('data-sort');
+
+        if (!icon) return;
+
+        if (column === invoiceSortColumn) {
+            icon.className = `fas fa-sort-${invoiceSortDirection === 'asc' ? 'up' : 'down'} sort-icon`;
+        } else {
+            icon.className = 'fas fa-sort sort-icon';
+        }
+    });
+}
+
+function clearInvoiceFilters() {
+    const searchEl = document.getElementById('invoice-search');
+    if (searchEl) searchEl.value = '';
+    filterInvoices();
+}
+
 // Status Change Functions
 let currentStatusChangeQueryId = null;
 
@@ -3093,6 +3892,13 @@ async function checkAuthStatus() {
 
 // Setup user interface based on user data
 function setupUserInterface(user) {
+    currentUser = user;
+    try {
+        sessionStorage.setItem('currentUser', JSON.stringify(user));
+    } catch (e) {
+        console.warn('Failed to persist currentUser:', e.message);
+    }
+
     // Update user info in navbar
     document.getElementById('currentUser').textContent = user.full_name || user.username;
     document.getElementById('userInfo').textContent = `${user.full_name || user.username} (${user.role})`;
@@ -3349,7 +4155,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const response = await fetch('/api/users', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
                     },
                     body: JSON.stringify(userData)
                 });
@@ -3453,7 +4260,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const response = await fetch(`/api/users/${userId}`, {
                     method: 'PUT',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
                     },
                     body: JSON.stringify(userData)
                 });
@@ -3509,9 +4317,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 const response = await fetch(`/api/users/${userId}/password`, {
                     method: 'PUT',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
                     },
-                    body: JSON.stringify({ new_password: newPassword })
+                    body: JSON.stringify({ password: newPassword })
                 });
                 
                 const result = await response.json();
@@ -3539,7 +4348,8 @@ async function deactivateUser(userId) {
     
     try {
         const response = await fetch(`/api/users/${userId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: csrfToken ? { 'x-csrf-token': csrfToken } : {}
         });
         
         const result = await response.json();

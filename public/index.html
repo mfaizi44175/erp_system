@@ -387,14 +387,14 @@
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="mb-3">
-                                        <label for="quotation-number" class="form-label">Quotation Number</label>
-                                        <input type="text" class="form-control" id="quotation-number" name="quotation_number" required>
+                                        <label for="tender-case-no" class="form-label">Tender No/Case No</label>
+                                        <input type="text" class="form-control" id="tender-case-no" name="tender_case_no" required>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
                                     <div class="mb-3">
-                                        <label for="quotation-date" class="form-label">Date</label>
-                                        <input type="date" class="form-control" id="quotation-date" name="date" required>
+                                        <label for="quotation-number" class="form-label">Quotation No</label>
+                                        <input type="text" class="form-control" id="quotation-number" name="quotation_number" required>
                                     </div>
                                 </div>
                             </div>
@@ -402,10 +402,19 @@
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="mb-3">
+                                        <label for="quotation-date" class="form-label">Date</label>
+                                        <input type="date" class="form-control" id="quotation-date" name="date" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
                                         <label for="to-client" class="form-label">To</label>
                                         <input type="text" class="form-control" id="to-client" name="to_client" required>
                                     </div>
                                 </div>
+                            </div>
+
+                            <div class="row">
                                 <div class="col-md-6">
                                     <div class="mb-3">
                                         <label for="linked-query" class="form-label">Linked Query</label>
@@ -413,6 +422,8 @@
                             <option value="">Select Query</option>
                         </select>
                                     </div>
+                                </div>
+                                <div class="col-md-6">
                                     <div class="mb-3">
                                         <label for="quotation-attachment" class="form-label">Attachment (Optional)</label>
                                         <input type="file" class="form-control" id="quotation-attachment" name="attachment" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.xlsx,.xls">
@@ -606,16 +617,22 @@
                             <input type="hidden" id="purchase-order-id" name="purchase-order-id">
                             
                             <div class="row">
-                                <div class="col-md-6">
+                                <div class="col-md-4">
                                     <div class="mb-3">
                                         <label for="po-number" class="form-label">PO Number</label>
                                         <input type="text" class="form-control" id="po-number" name="po_number" required>
                                     </div>
                                 </div>
-                                <div class="col-md-6">
+                                <div class="col-md-4">
                                     <div class="mb-3">
                                         <label for="po-date" class="form-label">Date</label>
                                         <input type="date" class="form-control" id="po-date" name="date" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="po-subject" class="form-label">Subject</label>
+                                        <input type="text" class="form-control" id="po-subject" name="subject" required>
                                     </div>
                                 </div>
                             </div>
@@ -737,8 +754,200 @@
         </div>
 
         <div id="invoices-module" class="module-content d-none">
-            <h2><i class="fas fa-receipt me-2"></i>Invoice Management</h2>
-            <p class="text-muted">Invoice module will be implemented here.</p>
+            <div class="row">
+                <div class="col-12">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2><i class="fas fa-receipt me-2"></i>Invoice Management</h2>
+                        <button class="btn btn-primary" onclick="showInvoiceForm()">
+                            <i class="fas fa-plus me-1"></i>New Invoice
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="invoice-dashboard">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" class="form-control" id="invoice-search" placeholder="Search by invoice no, ref, to...">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-outline-secondary" onclick="clearInvoiceFilters()">
+                            <i class="fas fa-times me-1"></i>Clear Filters
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover" id="invoices-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="sortable" data-sort="invoice_number">
+                                    Invoice No
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="date">
+                                    Date
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="to_client">
+                                    To
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="ref_no">
+                                    Ref
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th class="sortable" data-sort="grand_total">
+                                    Grand Total
+                                    <i class="fas fa-sort sort-icon"></i>
+                                </th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="invoices-table-body"></tbody>
+                    </table>
+                </div>
+
+                <div id="invoices-empty-state" class="empty-state d-none">
+                    <i class="fas fa-receipt"></i>
+                    <h4>No invoices found</h4>
+                    <p>Create your first invoice to get started.</p>
+                </div>
+            </div>
+
+            <div id="invoice-form-container" class="d-none">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 id="invoice-form-title">New Invoice</h4>
+                        <button type="button" class="btn-close float-end" onclick="hideInvoiceForm()"></button>
+                    </div>
+                    <div class="card-body">
+                        <form id="invoice-form">
+                            <input type="hidden" id="invoice-id" name="invoice-id">
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">NTN#</label>
+                                        <input type="text" class="form-control" id="invoice-ntn" value="4371458-7" readonly>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">GST#</label>
+                                        <input type="text" class="form-control" id="invoice-gst" value="2600437145815" readonly>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="invoice-ref-no" class="form-label">Ref#</label>
+                                        <input type="text" class="form-control" id="invoice-ref-no" name="ref_no" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="invoice-ar-no" class="form-label">A.R.No (Optional)</label>
+                                        <input type="text" class="form-control" id="invoice-ar-no" name="ar_no">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="invoice-date" class="form-label">Date</label>
+                                        <input type="date" class="form-control" id="invoice-date" name="date" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="invoice-number" class="form-label">Invoice No#</label>
+                                        <input type="text" class="form-control" id="invoice-number" name="invoice_number" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="invoice-to" class="form-label">To</label>
+                                        <input type="text" class="form-control" id="invoice-to" name="to_client" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr>
+
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6>Invoice Items</h6>
+                                <button type="button" class="btn btn-success btn-sm" onclick="addInvoiceItem()">
+                                    <i class="fas fa-plus me-1"></i>Add Item
+                                </button>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-bordered" id="invoice-items-table">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Sr.</th>
+                                            <th>Desc</th>
+                                            <th>A/U</th>
+                                            <th>QTy</th>
+                                            <th>U/P</th>
+                                            <th>T/P</th>
+                                            <th>Supplier U/P</th>
+                                            <th>Profit Factor</th>
+                                            <th>Exchange Rate</th>
+                                            <th>Calculated Price</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="invoice-items-tbody"></tbody>
+                                </table>
+                            </div>
+
+                            <div class="row mt-3">
+                                <div class="col-md-8"></div>
+                                <div class="col-md-4">
+                                    <table class="table table-sm">
+                                        <tr>
+                                            <td><strong>Total price without GST:</strong></td>
+                                            <td><span id="invoice-total-without-gst">0.00</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>GST 18%:</strong></td>
+                                            <td><span id="invoice-gst-amount">0.00</span></td>
+                                        </tr>
+                                        <tr class="table-primary">
+                                            <td><strong>Grand Total:</strong></td>
+                                            <td><strong><span id="invoice-grand-total">0.00</span></strong></td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <input type="hidden" id="invoice-total-without-gst-input" name="total_without_gst">
+                            <input type="hidden" id="invoice-gst-amount-input" name="gst_amount">
+                            <input type="hidden" id="invoice-grand-total-input" name="grand_total">
+
+                            <div class="d-flex justify-content-between">
+                                <button type="button" class="btn btn-secondary" onclick="hideInvoiceForm()">Cancel</button>
+                                <div>
+                                    <button type="button" class="btn btn-info me-2" onclick="generateInvoiceExcel()">
+                                        <i class="fas fa-file-excel me-1"></i>Generate Excel
+                                    </button>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save me-1"></i>Save Invoice
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Admin Module -->

@@ -5,12 +5,15 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-function request(method, reqPath, data = null, cookie = null) {
+function request(method, reqPath, data = null, cookie = null, csrfToken = null) {
   return new Promise((resolve, reject) => {
     const payload = data ? JSON.stringify(data) : null;
     const headers = { 'Content-Type': 'application/json' };
     if (payload) headers['Content-Length'] = Buffer.byteLength(payload);
     if (cookie) headers['Cookie'] = cookie;
+    if (csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(String(method).toUpperCase())) {
+      headers['x-csrf-token'] = csrfToken;
+    }
 
     const options = { hostname: 'localhost', port: 4002, path: reqPath, method, headers };
     const req = http.request(options, (res) => {
@@ -38,11 +41,12 @@ async function login(username, password) {
   const res = await request('POST', '/api/login', { username, password });
   if (res.status !== 200) throw new Error(`Login failed: ${res.status} ${res.bodyText}`);
   const cookie = res.setCookie.map(c => c.split(';')[0]).join('; ');
-  return { cookie, user: res.bodyJson?.user };
+  return { cookie, user: res.bodyJson?.user, csrfToken: res.bodyJson?.csrfToken || null };
 }
 
-async function createQuotation(cookie, queryId) {
+async function createQuotation(cookie, csrfToken, queryId) {
   const payload = {
+    tender_case_no: 'TN-CASE-0001',
     quotation_number: 'Q-2025-0001',
     date: '2025-11-21',
     to_client: 'ACME Corp',
@@ -75,7 +79,7 @@ async function createQuotation(cookie, queryId) {
     ],
   };
 
-  const res = await request('POST', '/api/quotations', payload, cookie);
+  const res = await request('POST', '/api/quotations', payload, cookie, csrfToken);
   if (res.status !== 200) throw new Error(`Create quotation failed: ${res.status} ${res.bodyText}`);
   return res.bodyJson;
 }
@@ -86,8 +90,9 @@ async function getQuotation(cookie, id) {
   return res.bodyJson;
 }
 
-async function updateQuotation(cookie, id) {
+async function updateQuotation(cookie, csrfToken, id) {
   const payload = {
+    tender_case_no: 'TN-CASE-0001-REV1',
     quotation_number: 'Q-2025-0001-REV1',
     date: '2025-11-22',
     to_client: 'ACME Corp',
@@ -120,7 +125,7 @@ async function updateQuotation(cookie, id) {
     ],
   };
 
-  const res = await request('PUT', `/api/quotations/${id}`, payload, cookie);
+  const res = await request('PUT', `/api/quotations/${id}`, payload, cookie, csrfToken);
   if (res.status !== 200) throw new Error(`Update quotation ${id} failed: ${res.status} ${res.bodyText}`);
   return res.bodyJson;
 }
@@ -154,12 +159,12 @@ async function exportQuotationExcel(cookie, id) {
 async function main() {
   try {
     console.log('Logging in...');
-    const { cookie, user } = await login('admin', 'AdminTest!2025');
+    const { cookie, user, csrfToken } = await login('admin', 'AdminTest!2025');
     console.log('Logged in as:', user?.username);
 
     const queryId = 12;
     console.log(`\nCreating quotation linked to query ${queryId}...`);
-    const created = await createQuotation(cookie, queryId);
+    const created = await createQuotation(cookie, csrfToken, queryId);
     console.log('Create response:', created);
     const qtid = created?.id;
     console.log('New quotation ID:', qtid);
@@ -170,7 +175,7 @@ async function main() {
     console.log('Items detail:', q1.items);
 
     console.log('\nUpdating quotation items/details...');
-    const upd = await updateQuotation(cookie, qtid);
+    const upd = await updateQuotation(cookie, csrfToken, qtid);
     console.log('Update response:', upd);
 
     console.log('\nFetching quotation after update...');

@@ -1077,23 +1077,23 @@ app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), requ
                   return;
                 }
 
-                const columnNames = new Set((columns || []).map((c) => c.name));
-                const hasSupplierName = columnNames.has('supplier_name');
-                const hasResponseStatus = columnNames.has('response_status');
-                const hasAttachmentPath = columnNames.has('attachment_path');
-                const hasOldSupplier = columnNames.has('supplier');
-                const hasOldResponse = columnNames.has('response');
-                const hasOldSupplierResponse = columnNames.has('supplier_response');
-                const hasOldAttachment = columnNames.has('attachment');
+                const schema = new Map((columns || []).map((c) => [c.name, c]));
+                const hasSupplierName = schema.has('supplier_name');
+                const hasResponseStatus = schema.has('response_status');
+                const hasAttachmentPath = schema.has('attachment_path');
+                const hasOldSupplier = schema.has('supplier');
+                const hasOldResponse = schema.has('response');
+                const hasOldSupplierResponse = schema.has('supplier_response');
+                const hasOldAttachment = schema.has('attachment');
 
                 const insertColumns = ['query_id'];
                 if (hasSupplierName) insertColumns.push('supplier_name');
-                else if (hasOldSupplier) insertColumns.push('supplier');
+                if (hasOldSupplier) insertColumns.push('supplier');
                 if (hasResponseStatus) insertColumns.push('response_status');
-                else if (hasOldResponse) insertColumns.push('response');
-                else if (hasOldSupplierResponse) insertColumns.push('supplier_response');
+                if (hasOldResponse) insertColumns.push('response');
+                if (hasOldSupplierResponse) insertColumns.push('supplier_response');
                 if (hasAttachmentPath) insertColumns.push('attachment_path');
-                else if (hasOldAttachment) insertColumns.push('attachment');
+                if (hasOldAttachment) insertColumns.push('attachment');
 
                 const insertPlaceholders = insertColumns.map(() => '?').join(', ');
                 const insertQuery = `INSERT INTO supplier_responses (${insertColumns.join(', ')}) VALUES (${insertPlaceholders})`;
@@ -1110,12 +1110,12 @@ app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), requ
 
                   const values = [queryId];
                   if (hasSupplierName) values.push(supplierName);
-                  else if (hasOldSupplier) values.push(supplierName);
+                  if (hasOldSupplier) values.push(supplierName);
                   if (hasResponseStatus) values.push(responseStatus);
-                  else if (hasOldResponse) values.push(responseStatus);
-                  else if (hasOldSupplierResponse) values.push(responseStatus);
+                  if (hasOldResponse) values.push(responseStatus);
+                  if (hasOldSupplierResponse) values.push(responseStatus);
                   if (hasAttachmentPath) values.push(attachmentPath);
-                  else if (hasOldAttachment) values.push(attachmentPath);
+                  if (hasOldAttachment) values.push(attachmentPath);
 
                   db.run(insertQuery, values, (insertErr) => {
                     if (insertErr) {

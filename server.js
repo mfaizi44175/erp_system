@@ -211,6 +211,82 @@ const upload = multer({
     // no-op
   }
 
+function ensureSupplierResponsesTable(callback) {
+  db.serialize(() => {
+    db.run(
+      `CREATE TABLE IF NOT EXISTS supplier_responses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query_id INTEGER,
+        supplier_name TEXT,
+        response_status TEXT,
+        attachment_path TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (query_id) REFERENCES queries (id)
+      )`,
+      () => {
+        db.all('PRAGMA table_info(supplier_responses)', (infoErr, columns) => {
+          if (infoErr) {
+            if (typeof callback === 'function') callback(infoErr);
+            return;
+          }
+
+          const columnNames = new Set((columns || []).map((c) => c.name));
+          const hasOldSupplier = columnNames.has('supplier');
+          const hasOldResponse = columnNames.has('response');
+          const hasOldSupplierResponse = columnNames.has('supplier_response');
+
+          const alterations = [];
+          if (!columnNames.has('supplier_name')) alterations.push('ALTER TABLE supplier_responses ADD COLUMN supplier_name TEXT');
+          if (!columnNames.has('response_status')) alterations.push('ALTER TABLE supplier_responses ADD COLUMN response_status TEXT');
+          if (!columnNames.has('attachment_path')) alterations.push('ALTER TABLE supplier_responses ADD COLUMN attachment_path TEXT');
+
+          const runNext = (idx) => {
+            if (idx >= alterations.length) {
+              const backfills = [];
+
+              if (hasOldSupplier) {
+                backfills.push('UPDATE supplier_responses SET supplier_name = supplier WHERE (supplier_name IS NULL OR supplier_name = \'\')');
+              }
+              if (hasOldResponse) {
+                backfills.push('UPDATE supplier_responses SET response_status = response WHERE (response_status IS NULL OR response_status = \'\')');
+              } else if (hasOldSupplierResponse) {
+                backfills.push('UPDATE supplier_responses SET response_status = supplier_response WHERE (response_status IS NULL OR response_status = \'\')');
+              }
+
+              const runBackfill = (bIdx) => {
+                if (bIdx >= backfills.length) {
+                  if (typeof callback === 'function') callback(null);
+                  return;
+                }
+                db.run(backfills[bIdx], (bfErr) => {
+                  if (bfErr) {
+                    if (typeof callback === 'function') callback(bfErr);
+                    return;
+                  }
+                  runBackfill(bIdx + 1);
+                });
+              };
+
+              runBackfill(0);
+              return;
+            }
+
+            db.run(alterations[idx], (alterErr) => {
+              if (alterErr && !String(alterErr.message || '').includes('duplicate column name')) {
+                if (typeof callback === 'function') callback(alterErr);
+                return;
+              }
+              runNext(idx + 1);
+            });
+          };
+
+          runNext(0);
+        });
+      }
+    );
+  });
+}
+
 // Create tables
 db.serialize(() => {
   // Queries table
@@ -271,6 +347,12 @@ db.serialize(() => {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (query_id) REFERENCES queries (id)
   )`);
+
+  ensureSupplierResponsesTable((err) => {
+    if (err) {
+      console.error('Error ensuring supplier_responses schema:', err);
+    }
+  });
 
   // Quotations table
   db.run(`CREATE TABLE IF NOT EXISTS quotations (
@@ -978,42 +1060,68 @@ app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), requ
       if (supplier_responses) {
         try {
           const parsedResponses = JSON.parse(supplier_responses);
-          
-          // Create supplier_responses table if it doesn't exist
-          db.run(`CREATE TABLE IF NOT EXISTS supplier_responses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            query_id INTEGER,
-            supplier_name TEXT,
-            response_status TEXT,
-            attachment_path TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (query_id) REFERENCES queries (id)
-          )`, (err) => {
-            if (err) {
-              console.error('Error creating supplier_responses table:', err);
+
+          ensureSupplierResponsesTable((ensureErr) => {
+            if (ensureErr) {
+              console.error('Error ensuring supplier_responses table:', ensureErr);
             }
-            
-            // Clear existing responses for this query
-            db.run('DELETE FROM supplier_responses WHERE query_id = ?', [queryId], (err) => {
-              if (err) {
-                console.error('Error clearing existing responses:', err);
+
+            db.run('DELETE FROM supplier_responses WHERE query_id = ?', [queryId], (clearErr) => {
+              if (clearErr) {
+                console.error('Error clearing existing responses:', clearErr);
               }
-              
-              // Insert new responses with file paths
-              const insertQuery = 'INSERT INTO supplier_responses (query_id, supplier_name, response_status, attachment_path) VALUES (?, ?, ?, ?)';
-              parsedResponses.forEach((response, index) => {
-                let attachmentPath = null;
-                
-                // Check if there's a file for this supplier
-                const fileFieldName = `supplier_attachment_${index}`;
-                if (req.files && req.files[fileFieldName] && req.files[fileFieldName][0]) {
-                  attachmentPath = toWebPath(req.files[fileFieldName][0].path);
+
+              db.all('PRAGMA table_info(supplier_responses)', (infoErr, columns) => {
+                if (infoErr) {
+                  console.error('Error reading supplier_responses schema:', infoErr);
+                  return;
                 }
-                
-                db.run(insertQuery, [queryId, response.supplier, response.response, attachmentPath], (err) => {
-                  if (err) {
-                    console.error('Error inserting supplier response:', err);
+
+                const columnNames = new Set((columns || []).map((c) => c.name));
+                const hasSupplierName = columnNames.has('supplier_name');
+                const hasResponseStatus = columnNames.has('response_status');
+                const hasAttachmentPath = columnNames.has('attachment_path');
+                const hasOldSupplier = columnNames.has('supplier');
+                const hasOldResponse = columnNames.has('response');
+                const hasOldSupplierResponse = columnNames.has('supplier_response');
+                const hasOldAttachment = columnNames.has('attachment');
+
+                const insertColumns = ['query_id'];
+                if (hasSupplierName) insertColumns.push('supplier_name');
+                else if (hasOldSupplier) insertColumns.push('supplier');
+                if (hasResponseStatus) insertColumns.push('response_status');
+                else if (hasOldResponse) insertColumns.push('response');
+                else if (hasOldSupplierResponse) insertColumns.push('supplier_response');
+                if (hasAttachmentPath) insertColumns.push('attachment_path');
+                else if (hasOldAttachment) insertColumns.push('attachment');
+
+                const insertPlaceholders = insertColumns.map(() => '?').join(', ');
+                const insertQuery = `INSERT INTO supplier_responses (${insertColumns.join(', ')}) VALUES (${insertPlaceholders})`;
+
+                parsedResponses.forEach((response, index) => {
+                  const attachmentFieldName = `supplier_attachment_${index}`;
+                  let attachmentPath = null;
+                  if (req.files && req.files[attachmentFieldName] && req.files[attachmentFieldName][0]) {
+                    attachmentPath = toWebPath(req.files[attachmentFieldName][0].path);
                   }
+
+                  const supplierName = response.supplier_name || response.supplier || '';
+                  const responseStatus = response.response_status || response.response || '';
+
+                  const values = [queryId];
+                  if (hasSupplierName) values.push(supplierName);
+                  else if (hasOldSupplier) values.push(supplierName);
+                  if (hasResponseStatus) values.push(responseStatus);
+                  else if (hasOldResponse) values.push(responseStatus);
+                  else if (hasOldSupplierResponse) values.push(responseStatus);
+                  if (hasAttachmentPath) values.push(attachmentPath);
+                  else if (hasOldAttachment) values.push(attachmentPath);
+
+                  db.run(insertQuery, values, (insertErr) => {
+                    if (insertErr) {
+                      console.error('Error inserting supplier response:', insertErr);
+                    }
+                  });
                 });
               });
             });

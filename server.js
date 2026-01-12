@@ -828,7 +828,7 @@ app.get('/api/queries', requireAuth, checkPermission('queries'), (req, res) => {
 });
 
 // Get single query with items
-app.get('/api/queries/:id', requireAuth, checkPermission('queries'), (req, res) => {
+app.get('/api/queries/:id(\\d+)', requireAuth, checkPermission('queries'), (req, res) => {
   const queryId = req.params.id;
   
   db.get('SELECT * FROM queries WHERE id = ?', [queryId], (err, query) => {
@@ -933,7 +933,7 @@ app.post('/api/queries', requireAuth, checkPermission('queries'), requireCsrf, w
 });
 
 // Update query
-app.put('/api/queries/:id', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.single('attachment'), (req, res) => {
+app.put('/api/queries/:id(\\d+)', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.single('attachment'), (req, res) => {
   const queryId = req.params.id;
   const {
     org_department,
@@ -1004,7 +1004,7 @@ app.put('/api/queries/:id', requireAuth, checkPermission('queries'), requireCsrf
 });
 
 // Delete query (soft delete)
-app.delete('/api/queries/:id', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, (req, res) => {
+app.delete('/api/queries/:id(\\d+)', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, (req, res) => {
   const queryId = req.params.id;
   
   db.run('UPDATE queries SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [queryId], function(err) {
@@ -1020,7 +1020,7 @@ app.delete('/api/queries/:id', requireAuth, checkPermission('queries'), requireC
 });
 
 // Update query status with file uploads
-app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.fields([
+app.put('/api/queries/:id(\\d+)/status', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.fields([
   { name: 'supplier_attachment_0', maxCount: 1 },
   { name: 'supplier_attachment_1', maxCount: 1 },
   { name: 'supplier_attachment_2', maxCount: 1 },
@@ -1141,7 +1141,7 @@ app.put('/api/queries/:id/status', requireAuth, checkPermission('queries'), requ
 });
 
 // Upload supplier response attachment
-app.post('/api/queries/:id/supplier-attachment', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.single('attachment'), (req, res) => {
+app.post('/api/queries/:id(\\d+)/supplier-attachment', requireAuth, checkPermission('queries'), requireCsrf, writeLimiter, upload.single('attachment'), (req, res) => {
   const queryId = req.params.id;
   const { supplier_name } = req.body;
   
@@ -1159,7 +1159,7 @@ app.post('/api/queries/:id/supplier-attachment', requireAuth, checkPermission('q
 });
 
 // Generate Excel for query
-app.get('/api/queries/:id/excel', requireAuth, checkPermission('queries'), async (req, res) => {
+app.get('/api/queries/:id(\\d+)/excel', requireAuth, checkPermission('queries'), async (req, res) => {
   const queryId = req.params.id;
   
   try {
@@ -1666,7 +1666,7 @@ app.post('/api/quotations/:id/approve-to-invoice', requireAdmin, requireCsrf, wr
   });
 });
 
-app.get('/api/queries/:id/related', requireAuth, (req, res) => {
+app.get('/api/queries/:id(\\d+)/related', requireAuth, (req, res) => {
   const queryId = req.params.id;
 
   db.get('SELECT role, permissions FROM users WHERE id = ?', [req.session.userId], (uErr, user) => {
